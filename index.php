@@ -69,11 +69,6 @@
         </div>
       </div>
       <br/>
-      <div class="row">
-        <div class="col align-self-center">
-          <div class="il-text">Copyright <?=date('Y')?></div>
-        </div>
-      </div>
     </div>
     <!-- Optional JavaScript -->
     <!-- jQuery first, then Popper.js, then Bootstrap JS -->

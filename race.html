@@ -17,6 +17,50 @@
             padding: 10px 15px;
             border-radius: 5px;
         }
+        #controls-container {
+            position: absolute;
+            bottom: 20px;
+            left: 20px;
+            display: grid;
+            grid-template-columns: repeat(3, 60px);
+            grid-template-rows: repeat(2, 60px);
+            gap: 5px;
+        }
+        .control-button {
+            width: 60px;
+            height: 60px;
+            background: rgba(100, 100, 100, 0.7);
+            border: 2px solid white;
+            border-radius: 5px;
+            color: white;
+            font-weight: bold;
+            font-size: 24px;
+            cursor: pointer;
+            user-select: none;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            touch-action: none;
+        }
+        .control-button:active {
+            background: rgba(200, 200, 200, 0.9);
+        }
+        #btn-forward {
+            grid-column: 2;
+            grid-row: 1;
+        }
+        #btn-left {
+            grid-column: 1;
+            grid-row: 2;
+        }
+        #btn-backward {
+            grid-column: 2;
+            grid-row: 2;
+        }
+        #btn-right {
+            grid-column: 3;
+            grid-row: 2;
+        }
     </style>
 </head>
 <body>
@@ -25,6 +69,12 @@
         ↑↓ Keys: Forward/Backward<br>
         ← → Keys: Left/Right<br>
         Avoid cars, buildings, trees, and pedestrians!
+    </div>
+    <div id="controls-container">
+        <button class="control-button" id="btn-forward">▲</button>
+        <button class="control-button" id="btn-left">◄</button>
+        <button class="control-button" id="btn-backward">▼</button>
+        <button class="control-button" id="btn-right">►</button>
     </div>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/loaders/MTLLoader.js"></script>
@@ -321,6 +371,49 @@
                 targetRotation = 0;
             }
         });
+
+        // Touch controls
+        const buttons = {
+            forward: document.getElementById('btn-forward'),
+            backward: document.getElementById('btn-backward'),
+            left: document.getElementById('btn-left'),
+            right: document.getElementById('btn-right')
+        };
+
+        function setupTouchButton(button, onStart, onEnd) {
+            button.addEventListener('touchstart', (e) => {
+                e.preventDefault();
+                onStart();
+            });
+            button.addEventListener('touchend', (e) => {
+                e.preventDefault();
+                onEnd();
+            });
+            button.addEventListener('mousedown', onStart);
+            button.addEventListener('mouseup', onEnd);
+            button.addEventListener('mouseleave', onEnd);
+        }
+
+        setupTouchButton(
+            buttons.forward,
+            () => { targetSpeed = maxSpeed; },
+            () => { targetSpeed = 0; }
+        );
+        setupTouchButton(
+            buttons.backward,
+            () => { targetSpeed = -maxSpeed; },
+            () => { targetSpeed = 0; }
+        );
+        setupTouchButton(
+            buttons.left,
+            () => { targetRotation = -0.05; },
+            () => { targetRotation = 0; }
+        );
+        setupTouchButton(
+            buttons.right,
+            () => { targetRotation = 0.05; },
+            () => { targetRotation = 0; }
+        );
 
         // Animation Loop
         function animate() {

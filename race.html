@@ -17,6 +17,48 @@
             padding: 10px 15px;
             border-radius: 5px;
         }
+        #reset-button {
+            position: absolute;
+            top: 20px;
+            right: 20px;
+            padding: 10px 20px;
+            background: rgba(200, 50, 50, 0.8);
+            color: white;
+            border: 2px solid white;
+            border-radius: 5px;
+            font-family: Arial, sans-serif;
+            font-size: 16px;
+            font-weight: bold;
+            cursor: pointer;
+            transition: background 0.2s;
+        }
+        #reset-button:hover {
+            background: rgba(255, 80, 80, 0.9);
+        }
+        #reset-button:active {
+            background: rgba(150, 30, 30, 0.9);
+        }
+        #view-toggle {
+            position: absolute;
+            top: 20px;
+            right: 140px;
+            padding: 10px 20px;
+            background: rgba(50, 100, 200, 0.8);
+            color: white;
+            border: 2px solid white;
+            border-radius: 5px;
+            font-family: Arial, sans-serif;
+            font-size: 16px;
+            font-weight: bold;
+            cursor: pointer;
+            transition: background 0.2s;
+        }
+        #view-toggle:hover {
+            background: rgba(80, 150, 255, 0.9);
+        }
+        #view-toggle:active {
+            background: rgba(30, 70, 150, 0.9);
+        }
         #controls-container {
             position: absolute;
             bottom: 20px;
@@ -66,10 +108,12 @@
 <body>
     <div id="instructions">
         <strong>Controls:</strong><br>
-        ↑↓ Keys: Forward/Backward<br>
-        ← → Keys: Left/Right<br>
+        ↑↓ Keys or WASD: Forward/Backward<br>
+        ← → Keys or AD: Left/Right<br>
         Avoid cars, buildings, trees, and pedestrians!
     </div>
+    <button id="view-toggle">1ST PERSON</button>
+    <button id="reset-button">RESET</button>
     <div id="controls-container">
         <button class="control-button" id="btn-forward">▲</button>
         <button class="control-button" id="btn-left">◄</button>
@@ -107,30 +151,48 @@
         light.position.set(5, 5, 5);
         scene.add(light);
 
-        // Road texture
+        // Road texture - US-style roads
         const canvas = document.createElement('canvas');
-        canvas.width = 256;
+        canvas.width = 1024;
         canvas.height = 256;
         const ctx = canvas.getContext('2d');
-        ctx.fillStyle = '#333333'; // dark gray for asphalt
-        ctx.fillRect(0, 0, 256, 256);
-        // Add lane markings
-        ctx.fillStyle = '#ffffff'; // white
-        for (let i = 0; i < 256; i += 32) {
-            ctx.fillRect(i, 0, 16, 256); // vertical stripes
+        
+        // Gray asphalt base
+        ctx.fillStyle = '#888888';
+        ctx.fillRect(0, 0, 1024, 256);
+        
+        // Add subtle grainy texture
+        for (let i = 0; i < 2000; i++) {
+            const x = Math.random() * 1024;
+            const y = Math.random() * 256;
+            ctx.fillStyle = `rgba(0, 0, 0, ${Math.random() * 0.08})`;
+            ctx.fillRect(x, y, 2, 2);
         }
+        
+        // Double yellow center line - centered and proportional
+        ctx.fillStyle = '#FFFF00';
+        const centerY = 128;
+        const lineWidth = 12;
+        const lineGap = 8;
+        
+        // Draw dashed center lines
+        for (let x = 0; x < 1024; x += 60) {
+            ctx.fillRect(x, centerY - lineWidth - lineGap / 2, 40, lineWidth);
+            ctx.fillRect(x, centerY + lineGap / 2, 40, lineWidth);
+        }
+        
         const texture = new THREE.CanvasTexture(canvas);
         texture.wrapS = THREE.RepeatWrapping;
         texture.wrapT = THREE.RepeatWrapping;
-        texture.repeat.set(5, 1); // repeat along the road
+        texture.repeat.set(1, 1);
 
         // City roads
-        const roadWidth = 10;
-        const roadLength = 200;
+        const roadWidth = 20; // Two lane road
+        const roadLength = 400;
         const roadMaterial = new THREE.MeshLambertMaterial({ map: texture, side: THREE.DoubleSide });
 
         // Horizontal roads
-        for (let z of [-50, 0, 50, 100]) {
+        for (let z of [-100, -50, 0, 50, 100, 150]) {
             const roadGeom = new THREE.PlaneGeometry(roadLength, roadWidth);
             const road = new THREE.Mesh(roadGeom, roadMaterial);
             road.rotation.x = -Math.PI / 2;
@@ -139,7 +201,7 @@
         }
 
         // Vertical roads
-        for (let x of [-50, 0, 50, 100]) {
+        for (let x of [-100, -50, 0, 50, 100, 150]) {
             const roadGeom = new THREE.PlaneGeometry(roadLength, roadWidth);
             const road = new THREE.Mesh(roadGeom, roadMaterial);
             road.rotation.x = -Math.PI / 2;
@@ -149,7 +211,7 @@
         }
 
         // Buildings
-        const roadPositions = [-50, 0, 50, 100];
+        const roadPositions = [-100, -50, 0, 50, 100, 150];
         const buildings = [];
         const pedestrians = [];
         for (let i = 0; i < roadPositions.length - 1; i++) {
@@ -170,17 +232,72 @@
                     const x = xMinBlock + width / 2 + Math.random() * (xMaxBlock - xMinBlock - width);
                     const z = zMinBlock + depth / 2 + Math.random() * (zMaxBlock - zMinBlock - depth);
                     const buildingGeom = new THREE.BoxGeometry(width, height, depth);
-                    const buildingMat = new THREE.MeshLambertMaterial({ color: Math.random() * 0x888888 + 0x444444 }); // random gray
+                    const buildingColor = Math.random() * 0x888888 + 0x555555; // lighter colors
+                    const buildingMat = new THREE.MeshLambertMaterial({ color: buildingColor });
                     const building = new THREE.Mesh(buildingGeom, buildingMat);
                     building.position.set(x, height / 2, z);
                     scene.add(building);
                     buildings.push(building);
+
+                    // Add windows to building
+                    const windowColor = 0xffff99; // light yellow for lit windows
+                    const windowMat = new THREE.MeshBasicMaterial({ color: windowColor });
+                    const windowSize = 0.6;
+                    const windowSpacing = 2;
+
+                    // Add windows on front face (z-direction)
+                    for (let wx = -width / 2 + 1.5; wx < width / 2; wx += windowSpacing) {
+                        for (let wy = 2; wy < height - 1; wy += windowSpacing) {
+                            const windowGeom = new THREE.PlaneGeometry(windowSize, windowSize);
+                            const windowMesh = new THREE.Mesh(windowGeom, windowMat);
+                            windowMesh.position.set(x + wx, wy, z + depth / 2 + 0.05);
+                            scene.add(windowMesh);
+                        }
+                    }
+
+                    // Add windows on back face
+                    for (let wx = -width / 2 + 1.5; wx < width / 2; wx += windowSpacing) {
+                        for (let wy = 2; wy < height - 1; wy += windowSpacing) {
+                            const windowGeom = new THREE.PlaneGeometry(windowSize, windowSize);
+                            const windowMesh = new THREE.Mesh(windowGeom, windowMat);
+                            windowMesh.position.set(x + wx, wy, z - depth / 2 - 0.05);
+                            scene.add(windowMesh);
+                        }
+                    }
+
+                    // Add windows on left face
+                    for (let wz = -depth / 2 + 1.5; wz < depth / 2; wz += windowSpacing) {
+                        for (let wy = 2; wy < height - 1; wy += windowSpacing) {
+                            const windowGeom = new THREE.PlaneGeometry(windowSize, windowSize);
+                            const windowMesh = new THREE.Mesh(windowGeom, windowMat);
+                            windowMesh.rotation.y = Math.PI / 2;
+                            windowMesh.position.set(x - width / 2 - 0.05, wy, z + wz);
+                            scene.add(windowMesh);
+                        }
+                    }
+
+                    // Add windows on right face
+                    for (let wz = -depth / 2 + 1.5; wz < depth / 2; wz += windowSpacing) {
+                        for (let wy = 2; wy < height - 1; wy += windowSpacing) {
+                            const windowGeom = new THREE.PlaneGeometry(windowSize, windowSize);
+                            const windowMesh = new THREE.Mesh(windowGeom, windowMat);
+                            windowMesh.rotation.y = Math.PI / 2;
+                            windowMesh.position.set(x + width / 2 + 0.05, wy, z + wz);
+                            scene.add(windowMesh);
+                        }
+                    }
                 }
             }
         }
 
         // Car creation function
-        function createCar(callback) {
+        function createCar(color, callback) {
+            // Handle optional color parameter
+            if (typeof color === 'function') {
+                callback = color;
+                color = null;
+            }
+
             const mtlLoader = new THREE.MTLLoader();
             mtlLoader.load('car_long_red.mtl', 
                 function(materials) {
@@ -193,6 +310,22 @@
                             console.log('OBJ loaded successfully');
                             object.scale.set(1.5, 1.5, 1.5);
                             object.position.y = 0.5;
+
+                            // Apply color tint if provided
+                            if (color) {
+                                object.traverse(function(child) {
+                                    if (child.isMesh) {
+                                        if (Array.isArray(child.material)) {
+                                            child.material.forEach(mat => {
+                                                mat.color.setHex(color);
+                                            });
+                                        } else {
+                                            child.material.color.setHex(color);
+                                        }
+                                    }
+                                });
+                            }
+
                             callback(object);
                         },
                         function(progress) {
@@ -264,39 +397,44 @@
         // AI Cars
         const aiCars = [];
         
-        // Define waypoint paths for AI cars - constrained to roads at x: -50, 0, 50, 100 and z: -50, 0, 50, 100
+        // Define waypoint paths for AI cars - constrained to roads at x: -100, -50, 0, 50, 100, 150 and z: -100, -50, 0, 50, 100, 150
         const aiCarPaths = [
             // Car 1: outer loop on road perimeter
+            [
+                { x: -100, z: -100 }, { x: -50, z: -100 }, { x: 0, z: -100 }, { x: 50, z: -100 }, { x: 100, z: -100 }, { x: 150, z: -100 },
+                { x: 150, z: -50 }, { x: 150, z: 0 }, { x: 150, z: 50 }, { x: 150, z: 100 }, { x: 150, z: 150 },
+                { x: 100, z: 150 }, { x: 50, z: 150 }, { x: 0, z: 150 }, { x: -50, z: 150 }, { x: -100, z: 150 },
+                { x: -100, z: 100 }, { x: -100, z: 50 }, { x: -100, z: 0 }, { x: -100, z: -50 }
+            ],
+            // Car 2: middle roads loop
             [
                 { x: -50, z: -50 }, { x: 0, z: -50 }, { x: 50, z: -50 }, { x: 100, z: -50 },
                 { x: 100, z: 0 }, { x: 100, z: 50 }, { x: 100, z: 100 },
                 { x: 50, z: 100 }, { x: 0, z: 100 }, { x: -50, z: 100 },
                 { x: -50, z: 50 }, { x: -50, z: 0 }
             ],
-            // Car 2: middle roads loop
+            // Car 3: inner roads
             [
                 { x: 0, z: 0 }, { x: 50, z: 0 }, { x: 50, z: 50 }, { x: 0, z: 50 }
-            ],
-            // Car 3: figure-8 pattern on roads
-            [
-                { x: -50, z: 0 }, { x: 0, z: 0 }, { x: 50, z: 0 }, { x: 100, z: 0 },
-                { x: 100, z: 50 }, { x: 50, z: 50 }, { x: 0, z: 50 }, { x: -50, z: 50 }
             ]
         ];
         
         // Create AI cars with waypoint paths
+        const colors = [0x00ff00, 0x0000ff, 0xffff00]; // green, blue, yellow
         for (let i = 0; i < 3; i++) {
-            createCar(function(aiCar) {
-                aiCar.position.set(aiCarPaths[i][0].x, 0.5, aiCarPaths[i][0].z);
-                scene.add(aiCar);
-                aiCars.push({
-                    mesh: aiCar,
-                    speed: 0.08 + Math.random() * 0.05,
-                    pathIndex: 0,
-                    waypoints: aiCarPaths[i],
-                    distanceToWaypoint: 0
+            (function(index) {
+                createCar(colors[index], function(aiCar) {
+                    aiCar.position.set(aiCarPaths[index][0].x, 0.5, aiCarPaths[index][0].z);
+                    scene.add(aiCar);
+                    aiCars.push({
+                        mesh: aiCar,
+                        speed: 0.08 + Math.random() * 0.05,
+                        pathIndex: 0,
+                        waypoints: aiCarPaths[index],
+                        distanceToWaypoint: 0
+                    });
                 });
-            });
+            })(i);
         }
 
         // Trees
@@ -351,23 +489,60 @@
         const acceleration = 0.02;
         const rotAcceleration = 0.1;
         const maxSpeed = 0.5;
+        let isFirstPerson = false;
+
+        // Reset function
+        function resetGame() {
+            if (!car) return;
+            
+            // Reset player car
+            car.position.set(0, 0.5, 0);
+            car.rotation.set(0, 0, 0);
+            targetSpeed = 0;
+            targetRotation = 0;
+            currentSpeed = 0;
+            currentRotation = 0;
+
+            // Reset AI cars
+            aiCars.forEach((aiCar, index) => {
+                aiCar.mesh.position.set(aiCarPaths[index][0].x, 0.5, aiCarPaths[index][0].z);
+                aiCar.mesh.rotation.set(0, 0, 0);
+                aiCar.pathIndex = 0;
+            });
+        }
+
+        // Add reset button listener
+        document.getElementById('reset-button').addEventListener('click', resetGame);
+
+        // First person toggle
+        document.getElementById('view-toggle').addEventListener('click', function() {
+            isFirstPerson = !isFirstPerson;
+            if (car) car.visible = !isFirstPerson;
+            this.textContent = isFirstPerson ? '3RD PERSON' : '1ST PERSON';
+        });
 
         document.addEventListener('keydown', (event) => {
-            if (event.key === 'ArrowUp') {
+            if (event.key === 'ArrowUp' || event.key === 'w' || event.key === 'W') {
                 targetSpeed = maxSpeed;
-            } else if (event.key === 'ArrowDown') {
+            } else if (event.key === 'ArrowDown' || event.key === 's' || event.key === 'S') {
                 targetSpeed = -maxSpeed;
-            } else if (event.key === 'ArrowLeft') {
-                targetRotation = -0.05;
-            } else if (event.key === 'ArrowRight') {
+            } else if (event.key === 'ArrowLeft' || event.key === 'a' || event.key === 'A') {
                 targetRotation = 0.05;
+            } else if (event.key === 'ArrowRight' || event.key === 'd' || event.key === 'D') {
+                targetRotation = -0.05;
+            } else if (event.key === 'p' || event.key === 'P') {
+                isFirstPerson = !isFirstPerson;
+                if (car) car.visible = !isFirstPerson;
+                document.getElementById('view-toggle').textContent = isFirstPerson ? '3RD PERSON' : '1ST PERSON';
             }
         });
 
         document.addEventListener('keyup', (event) => {
-            if (event.key === 'ArrowUp' || event.key === 'ArrowDown') {
+            if (event.key === 'ArrowUp' || event.key === 'w' || event.key === 'W' || 
+                event.key === 'ArrowDown' || event.key === 's' || event.key === 'S') {
                 targetSpeed = 0;
-            } else if (event.key === 'ArrowLeft' || event.key === 'ArrowRight') {
+            } else if (event.key === 'ArrowLeft' || event.key === 'a' || event.key === 'A' || 
+                       event.key === 'ArrowRight' || event.key === 'd' || event.key === 'D') {
                 targetRotation = 0;
             }
         });
@@ -406,12 +581,12 @@
         );
         setupTouchButton(
             buttons.left,
-            () => { targetRotation = -0.05; },
+            () => { targetRotation = 0.05; },
             () => { targetRotation = 0; }
         );
         setupTouchButton(
             buttons.right,
-            () => { targetRotation = 0.05; },
+            () => { targetRotation = -0.05; },
             () => { targetRotation = 0; }
         );
 
@@ -472,13 +647,27 @@
             }
 
             // Update camera position to follow the car
-            const offset = 10; // Distance from the car
-            camera.position.x = car.position.x;
-            camera.position.z = car.position.z - offset;
-            camera.position.y = 10;
-
-            // Look at the car
-            camera.lookAt(car.position);
+            if (isFirstPerson) {
+                // First person view - positioned as if sitting in driver's seat
+                const driverOffsetX = Math.sin(car.rotation.y) * 0.3;
+                const driverOffsetZ = Math.cos(car.rotation.y) * 0.3;
+                camera.position.x = car.position.x + driverOffsetX;
+                camera.position.z = car.position.z + driverOffsetZ;
+                camera.position.y = car.position.y + 1.2;
+                
+                // Look ahead in the direction of movement
+                const lookAheadDistance = 8;
+                const lookX = car.position.x + Math.sin(car.rotation.y) * lookAheadDistance;
+                const lookZ = car.position.z + Math.cos(car.rotation.y) * lookAheadDistance;
+                camera.lookAt(lookX, car.position.y + 0.8, lookZ);
+            } else {
+                // Third person view
+                const offset = 10;
+                camera.position.x = car.position.x;
+                camera.position.z = car.position.z - offset;
+                camera.position.y = 10;
+                camera.lookAt(car.position);
+            }
 
             // Update AI cars
             aiCars.forEach(aiCar => {

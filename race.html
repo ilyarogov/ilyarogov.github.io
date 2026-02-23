@@ -27,6 +27,8 @@
         Avoid cars, buildings, trees, and pedestrians!
     </div>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/loaders/MTLLoader.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/loaders/OBJLoader.js"></script>
     <script>
         // Scene, Camera, Renderer
         const scene = new THREE.Scene();
@@ -128,58 +130,36 @@
         }
 
         // Car creation function
-        function createCar(color) {
-            const carGeom = new THREE.BoxGeometry(2, 1, 4);
-            const carMat = new THREE.MeshBasicMaterial({ color: color });
-            const car = new THREE.Mesh(carGeom, carMat);
-            car.position.y = 0.25;
-
-            // Cabin
-            const cabin = new THREE.Mesh(new THREE.BoxGeometry(1.4, 0.5, 2), new THREE.MeshLambertMaterial({ color: color }));
-            cabin.position.set(0, 0.25, 0.2);
-            car.add(cabin);
-
-            // Bumpers
-            const bumperMat = new THREE.MeshLambertMaterial({ color: 0x333333 });
-            const frontBumper = new THREE.Mesh(new THREE.BoxGeometry(2, 0.2, 0.2), bumperMat);
-            frontBumper.position.set(0, -0.1, 2.1);
-            car.add(frontBumper);
-            const backBumper = new THREE.Mesh(new THREE.BoxGeometry(2, 0.2, 0.2), bumperMat);
-            backBumper.position.set(0, -0.1, -2.1);
-            car.add(backBumper);
-
-            // Spoiler
-            const spoiler = new THREE.Mesh(new THREE.BoxGeometry(1.8, 0.3, 0.1), new THREE.MeshLambertMaterial({ color: 0x222222 }));
-            spoiler.position.set(0, 0.4, -1.8);
-            car.add(spoiler);
-
-            // Windows
-            const windowMat = new THREE.MeshBasicMaterial({ color: 0x87CEEB, transparent: true, opacity: 0.7 });
-            const leftWindow = new THREE.Mesh(new THREE.PlaneGeometry(1.2, 0.4), windowMat);
-            leftWindow.position.set(-1.01, 0.25, 0.2);
-            leftWindow.rotation.y = Math.PI / 2;
-            car.add(leftWindow);
-            const rightWindow = new THREE.Mesh(new THREE.PlaneGeometry(1.2, 0.4), windowMat);
-            rightWindow.position.set(1.01, 0.25, 0.2);
-            rightWindow.rotation.y = -Math.PI / 2;
-            car.add(rightWindow);
-
-            // Wheels
-            const wheelMat = new THREE.MeshLambertMaterial({ color: 0x222222 });
-            const wheelGeom = new THREE.CylinderGeometry(0.3, 0.3, 0.2, 8);
-            const wheelPositions = [
-                { x: -0.8, z: 1.5 },
-                { x: 0.8, z: 1.5 },
-                { x: -0.8, z: -1.5 },
-                { x: 0.8, z: -1.5 }
-            ];
-            wheelPositions.forEach(pos => {
-                const wheel = new THREE.Mesh(wheelGeom, wheelMat);
-                wheel.position.set(pos.x, -0.25, pos.z);
-                car.add(wheel);
-            });
-
-            return car;
+        function createCar(callback) {
+            const mtlLoader = new THREE.MTLLoader();
+            mtlLoader.load('car_long_red.mtl', 
+                function(materials) {
+                    console.log('MTL loaded successfully');
+                    materials.preload();
+                    const objLoader = new THREE.OBJLoader();
+                    objLoader.setMaterials(materials);
+                    objLoader.load('car_long_red.obj', 
+                        function(object) {
+                            console.log('OBJ loaded successfully');
+                            object.scale.set(1.5, 1.5, 1.5);
+                            object.position.y = 0.5;
+                            callback(object);
+                        },
+                        function(progress) {
+                            console.log('OBJ loading progress:', progress.loaded / progress.total);
+                        },
+                        function(error) {
+                            console.error('Error loading OBJ:', error);
+                        }
+                    );
+                },
+                function(progress) {
+                    console.log('MTL loading progress:', progress.loaded / progress.total);
+                },
+                function(error) {
+                    console.error('Error loading MTL:', error);
+                }
+            );
         }
 
         // Pedestrian creation function
@@ -225,43 +205,49 @@
         }
 
         // Player car
-        const car = createCar(0xff0000);
-        scene.add(car);
+        let car;
+        createCar(function(loadedCar) {
+            car = loadedCar;
+            scene.add(car);
+        });
 
         // AI Cars
         const aiCars = [];
-        // Car on z=0, moving in x
-        const aiCar1 = createCar(0x00ff00);
-        aiCar1.position.set(-40, 0.25, 0);
-        scene.add(aiCar1);
-        aiCars.push({ mesh: aiCar1, speed: 0.15, direction: 1, axis: 'x', min: -40, max: 40, fixed: 'z', fixedVal: 0 });
-
-        // Car on x=0, moving in z
-        const aiCar2 = createCar(0x0000ff);
-        aiCar2.position.set(0, 0.25, -40);
-        scene.add(aiCar2);
-        aiCars.push({ mesh: aiCar2, speed: 0.12, direction: 1, axis: 'z', min: -40, max: 40, fixed: 'x', fixedVal: 0 });
-
-        // Car on z=50, moving in x
-        const aiCar3 = createCar(0xffff00);
-        aiCar3.position.set(-40, 0.25, 50);
-        scene.add(aiCar3);
-        aiCars.push({ mesh: aiCar3, speed: 0.18, direction: 1, axis: 'x', min: -40, max: 40, fixed: 'z', fixedVal: 50 });
-
-        // Wheels
-        const wheelMaterial = new THREE.MeshLambertMaterial({ color: 0x222222 });
-        const wheelGeom = new THREE.CylinderGeometry(0.3, 0.3, 0.2, 8);
-        const wheelPositions = [
-            { x: -0.8, z: 1.5 }, // front left
-            { x: 0.8, z: 1.5 },  // front right
-            { x: -0.8, z: -1.5 }, // back left
-            { x: 0.8, z: -1.5 }   // back right
+        
+        // Define waypoint paths for AI cars - constrained to roads at x: -50, 0, 50, 100 and z: -50, 0, 50, 100
+        const aiCarPaths = [
+            // Car 1: outer loop on road perimeter
+            [
+                { x: -50, z: -50 }, { x: 0, z: -50 }, { x: 50, z: -50 }, { x: 100, z: -50 },
+                { x: 100, z: 0 }, { x: 100, z: 50 }, { x: 100, z: 100 },
+                { x: 50, z: 100 }, { x: 0, z: 100 }, { x: -50, z: 100 },
+                { x: -50, z: 50 }, { x: -50, z: 0 }
+            ],
+            // Car 2: middle roads loop
+            [
+                { x: 0, z: 0 }, { x: 50, z: 0 }, { x: 50, z: 50 }, { x: 0, z: 50 }
+            ],
+            // Car 3: figure-8 pattern on roads
+            [
+                { x: -50, z: 0 }, { x: 0, z: 0 }, { x: 50, z: 0 }, { x: 100, z: 0 },
+                { x: 100, z: 50 }, { x: 50, z: 50 }, { x: 0, z: 50 }, { x: -50, z: 50 }
+            ]
         ];
-        wheelPositions.forEach(pos => {
-            const wheel = new THREE.Mesh(wheelGeom, wheelMaterial);
-            wheel.position.set(pos.x, -0.25, pos.z);
-            car.add(wheel);
-        });
+        
+        // Create AI cars with waypoint paths
+        for (let i = 0; i < 3; i++) {
+            createCar(function(aiCar) {
+                aiCar.position.set(aiCarPaths[i][0].x, 0.5, aiCarPaths[i][0].z);
+                scene.add(aiCar);
+                aiCars.push({
+                    mesh: aiCar,
+                    speed: 0.08 + Math.random() * 0.05,
+                    pathIndex: 0,
+                    waypoints: aiCarPaths[i],
+                    distanceToWaypoint: 0
+                });
+            });
+        }
 
         // Trees
         const treeGeometry = new THREE.ConeGeometry(0.5, 1, 4);
@@ -340,6 +326,8 @@
         function animate() {
             requestAnimationFrame(animate);
 
+            if (!car) return;
+
             // Update current speed and rotation
             currentSpeed += (targetSpeed - currentSpeed) * acceleration;
             currentRotation += (targetRotation - currentRotation) * rotAcceleration;
@@ -401,11 +389,24 @@
 
             // Update AI cars
             aiCars.forEach(aiCar => {
-                aiCar.mesh.position[aiCar.axis] += aiCar.speed * aiCar.direction;
-                aiCar.mesh.position[aiCar.fixed] = aiCar.fixedVal;
-                if (aiCar.mesh.position[aiCar.axis] > aiCar.max || aiCar.mesh.position[aiCar.axis] < aiCar.min) {
-                    aiCar.direction *= -1;
-                    aiCar.mesh.rotation.y += Math.PI;
+                const currentWaypoint = aiCar.waypoints[aiCar.pathIndex];
+                const nextWaypoint = aiCar.waypoints[(aiCar.pathIndex + 1) % aiCar.waypoints.length];
+                
+                const dirX = nextWaypoint.x - aiCar.mesh.position.x;
+                const dirZ = nextWaypoint.z - aiCar.mesh.position.z;
+                const distance = Math.sqrt(dirX * dirX + dirZ * dirZ);
+                
+                if (distance < 2) {
+                    aiCar.pathIndex = (aiCar.pathIndex + 1) % aiCar.waypoints.length;
+                } else {
+                    const normalizedDirX = dirX / distance;
+                    const normalizedDirZ = dirZ / distance;
+                    
+                    aiCar.mesh.position.x += normalizedDirX * aiCar.speed;
+                    aiCar.mesh.position.z += normalizedDirZ * aiCar.speed;
+                    
+                    // Rotate car to face direction of movement
+                    aiCar.mesh.rotation.y = Math.atan2(normalizedDirX, normalizedDirZ);
                 }
             });
 

@@ -103,6 +103,41 @@
             grid-column: 3;
             grid-row: 2;
         }
+        #fps-counter {
+            position: absolute;
+            top: 20px;
+            left: 50%;
+            transform: translateX(-50%);
+            color: white;
+            font-family: monospace;
+            font-size: 18px;
+            background: rgba(0, 0, 0, 0.5);
+            padding: 8px 15px;
+            border-radius: 5px;
+        }
+        #red-flash {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(255, 0, 0, 0.5);
+            pointer-events: none;
+            opacity: 0;
+            transition: opacity 0.1s;
+            z-index: 9999;
+        }
+        #kill-counter {
+            position: absolute;
+            bottom: 20px;
+            right: 20px;
+            color: white;
+            font-family: monospace;
+            font-size: 18px;
+            background: rgba(0, 0, 0, 0.5);
+            padding: 8px 15px;
+            border-radius: 5px;
+        }
     </style>
 </head>
 <body>
@@ -112,6 +147,9 @@
         ← → Keys or AD: Left/Right<br>
         Avoid cars, buildings, trees, and pedestrians!
     </div>
+    <div id="fps-counter">FPS: 0</div>
+    <div id="red-flash"></div>
+    <div id="kill-counter">Pedestrians Hit: 0</div>
     <button id="view-toggle">1ST PERSON</button>
     <button id="reset-button">RESET</button>
     <div id="controls-container">
@@ -186,106 +224,452 @@
         texture.wrapT = THREE.RepeatWrapping;
         texture.repeat.set(1, 1);
 
-        // City roads
-        const roadWidth = 20; // Two lane road
+        // City roads - initial roads handled by chunk system
+        const roadWidth = 20;
         const roadLength = 400;
-        const roadMaterial = new THREE.MeshLambertMaterial({ map: texture, side: THREE.DoubleSide });
+        const roadMaterial = new THREE.MeshLambertMaterial({ 
+            map: texture, 
+            side: THREE.DoubleSide,
+            polygonOffset: true,
+            polygonOffsetFactor: -1,
+            polygonOffsetUnits: -1
+        });
 
-        // Horizontal roads
-        for (let z of [-100, -50, 0, 50, 100, 150]) {
-            const roadGeom = new THREE.PlaneGeometry(roadLength, roadWidth);
-            const road = new THREE.Mesh(roadGeom, roadMaterial);
-            road.rotation.x = -Math.PI / 2;
-            road.position.set(0, 0, z);
-            scene.add(road);
-        }
-
-        // Vertical roads
-        for (let x of [-100, -50, 0, 50, 100, 150]) {
-            const roadGeom = new THREE.PlaneGeometry(roadLength, roadWidth);
-            const road = new THREE.Mesh(roadGeom, roadMaterial);
-            road.rotation.x = -Math.PI / 2;
-            road.rotation.z = Math.PI / 2;
-            road.position.set(x, -0.001, 0);
-            scene.add(road);
-        }
-
-        // Buildings
-        const roadPositions = [-100, -50, 0, 50, 100, 150];
+        // Buildings array (populated by chunk system)
         const buildings = [];
         const pedestrians = [];
-        for (let i = 0; i < roadPositions.length - 1; i++) {
-            for (let j = 0; j < roadPositions.length - 1; j++) {
-                const xMin = roadPositions[i];
-                const xMax = roadPositions[i + 1];
-                const zMin = roadPositions[j];
-                const zMax = roadPositions[j + 1];
-                const xMinBlock = xMin + 10;
-                const xMaxBlock = xMax - 10;
-                const zMinBlock = zMin + 10;
-                const zMaxBlock = zMax - 10;
-                const numBuildings = Math.floor(Math.random() * 3) + 1; // 1-3 buildings per block
-                for (let k = 0; k < numBuildings; k++) {
-                    const width = Math.random() * 10 + 5; // 5-15
-                    const depth = Math.random() * 10 + 5;
-                    const height = Math.random() * 20 + 10; // 10-30
-                    const x = xMinBlock + width / 2 + Math.random() * (xMaxBlock - xMinBlock - width);
-                    const z = zMinBlock + depth / 2 + Math.random() * (zMaxBlock - zMinBlock - depth);
-                    const buildingGeom = new THREE.BoxGeometry(width, height, depth);
-                    const buildingColor = Math.random() * 0x888888 + 0x555555; // lighter colors
-                    const buildingMat = new THREE.MeshLambertMaterial({ color: buildingColor });
-                    const building = new THREE.Mesh(buildingGeom, buildingMat);
-                    building.position.set(x, height / 2, z);
-                    scene.add(building);
-                    buildings.push(building);
+        const trees = [];
+        const treeGeometry = new THREE.ConeGeometry(2.5, 10, 8);
+        const treeMaterial = new THREE.MeshBasicMaterial({ color: 0x228822 });
 
-                    // Add windows to building
-                    const windowColor = 0xffff99; // light yellow for lit windows
-                    const windowMat = new THREE.MeshBasicMaterial({ color: windowColor });
-                    const windowSize = 0.6;
-                    const windowSpacing = 2;
+        // Chunk system for infinite procedural generation
+        const CHUNK_SIZE = 100;
+        const LOAD_DISTANCE = 300;
+        const UNLOAD_DISTANCE = 500;
+        const loadedChunks = new Map();
+        const chunkObjects = new Map();
 
-                    // Add windows on front face (z-direction)
-                    for (let wx = -width / 2 + 1.5; wx < width / 2; wx += windowSpacing) {
-                        for (let wy = 2; wy < height - 1; wy += windowSpacing) {
-                            const windowGeom = new THREE.PlaneGeometry(windowSize, windowSize);
-                            const windowMesh = new THREE.Mesh(windowGeom, windowMat);
-                            windowMesh.position.set(x + wx, wy, z + depth / 2 + 0.05);
-                            scene.add(windowMesh);
+        // Seeded random number generator for procedural generation
+        function seededRandom(seed) {
+            const x = Math.sin(seed) * 10000;
+            return x - Math.floor(x);
+        }
+
+        function getChunkKey(chunkX, chunkZ) {
+            return `${chunkX},${chunkZ}`;
+        }
+
+        function getChunkCoords(worldX, worldZ) {
+            return {
+                x: Math.floor(worldX / CHUNK_SIZE),
+                z: Math.floor(worldZ / CHUNK_SIZE)
+            };
+        }
+
+        function generateChunk(chunkX, chunkZ) {
+            const chunkKey = getChunkKey(chunkX, chunkZ);
+            if (loadedChunks.has(chunkKey)) return;
+
+            const chunkOriginX = chunkX * CHUNK_SIZE;
+            const chunkOriginZ = chunkZ * CHUNK_SIZE;
+            const chunkGroup = new THREE.Group();
+            
+            const seed = chunkX * 73856093 ^ chunkZ * 19349663;
+            const roadSpacing = 50;
+            
+            // Create single chunk ground plane with road texture
+            const chunkCanvas = document.createElement('canvas');
+            chunkCanvas.width = 2048;
+            chunkCanvas.height = 2048;
+            const chunkCtx = chunkCanvas.getContext('2d');
+            
+            // Ground base color
+            chunkCtx.fillStyle = '#5eb877';
+            chunkCtx.fillRect(0, 0, 2048, 2048);
+            
+            // Calculate road positions in chunk space
+            const pixelsPerUnit = 2048 / (CHUNK_SIZE * 2);
+            const roadWidthPixels = 20 * pixelsPerUnit;
+            const cornerRadius = roadWidthPixels / 2;
+            
+            // Collect all road positions
+            const horizontalRoadPositions = [];
+            const verticalRoadPositions = [];
+            
+            for (let x = chunkOriginX - CHUNK_SIZE / 2; x <= chunkOriginX + CHUNK_SIZE * 1.5; x += roadSpacing) {
+                const pixelX = ((x - (chunkOriginX - CHUNK_SIZE / 2)) / (CHUNK_SIZE * 2)) * 2048;
+                horizontalRoadPositions.push(pixelX);
+            }
+            
+            for (let z = chunkOriginZ - CHUNK_SIZE / 2; z <= chunkOriginZ + CHUNK_SIZE * 1.5; z += roadSpacing) {
+                const pixelZ = ((z - (chunkOriginZ - CHUNK_SIZE / 2)) / (CHUNK_SIZE * 2)) * 2048;
+                verticalRoadPositions.push(pixelZ);
+            }
+            
+            // Draw gray road base
+            chunkCtx.fillStyle = '#5e5e5e';
+            
+            // Draw all horizontal roads
+            horizontalRoadPositions.forEach(pixelX => {
+                chunkCtx.fillRect(0, pixelX - roadWidthPixels / 2, 2048, roadWidthPixels);
+            });
+            
+            // Draw all vertical roads
+            verticalRoadPositions.forEach(pixelZ => {
+                chunkCtx.fillRect(pixelZ - roadWidthPixels / 2, 0, roadWidthPixels, 2048);
+            });
+            
+            // Draw rounded corners at intersections
+            horizontalRoadPositions.forEach(pixelX => {
+                verticalRoadPositions.forEach(pixelZ => {
+                    const halfRoad = roadWidthPixels / 2;
+                    
+                    // Draw a rounded square at the intersection
+                    chunkCtx.beginPath();
+                    chunkCtx.moveTo(pixelZ - halfRoad + cornerRadius, pixelX - halfRoad);
+                    chunkCtx.lineTo(pixelZ + halfRoad - cornerRadius, pixelX - halfRoad);
+                    chunkCtx.arcTo(pixelZ + halfRoad, pixelX - halfRoad, pixelZ + halfRoad, pixelX - halfRoad + cornerRadius, cornerRadius);
+                    chunkCtx.lineTo(pixelZ + halfRoad, pixelX + halfRoad - cornerRadius);
+                    chunkCtx.arcTo(pixelZ + halfRoad, pixelX + halfRoad, pixelZ + halfRoad - cornerRadius, pixelX + halfRoad, cornerRadius);
+                    chunkCtx.lineTo(pixelZ - halfRoad + cornerRadius, pixelX + halfRoad);
+                    chunkCtx.arcTo(pixelZ - halfRoad, pixelX + halfRoad, pixelZ - halfRoad, pixelX + halfRoad - cornerRadius, cornerRadius);
+                    chunkCtx.lineTo(pixelZ - halfRoad, pixelX - halfRoad + cornerRadius);
+                    chunkCtx.arcTo(pixelZ - halfRoad, pixelX - halfRoad, pixelZ - halfRoad + cornerRadius, pixelX - halfRoad, cornerRadius);
+                    chunkCtx.closePath();
+                    chunkCtx.fill();
+                });
+            });
+            
+            // Draw white edge lines
+            chunkCtx.strokeStyle = '#FFFFFF';
+            chunkCtx.lineWidth = 2;
+            
+            // Horizontal road edges
+            horizontalRoadPositions.forEach(pixelX => {
+                // Top edge
+                chunkCtx.beginPath();
+                chunkCtx.moveTo(0, pixelX - roadWidthPixels / 2);
+                chunkCtx.lineTo(2048, pixelX - roadWidthPixels / 2);
+                chunkCtx.stroke();
+                
+                // Bottom edge
+                chunkCtx.beginPath();
+                chunkCtx.moveTo(0, pixelX + roadWidthPixels / 2);
+                chunkCtx.lineTo(2048, pixelX + roadWidthPixels / 2);
+                chunkCtx.stroke();
+            });
+            
+            // Vertical road edges
+            verticalRoadPositions.forEach(pixelZ => {
+                // Left edge
+                chunkCtx.beginPath();
+                chunkCtx.moveTo(pixelZ - roadWidthPixels / 2, 0);
+                chunkCtx.lineTo(pixelZ - roadWidthPixels / 2, 2048);
+                chunkCtx.stroke();
+                
+                // Right edge
+                chunkCtx.beginPath();
+                chunkCtx.moveTo(pixelZ + roadWidthPixels / 2, 0);
+                chunkCtx.lineTo(pixelZ + roadWidthPixels / 2, 2048);
+                chunkCtx.stroke();
+            });
+            
+            // Draw dashed yellow center lines
+            chunkCtx.fillStyle = '#FFFF00';
+            const lineWidth = 2.5;
+            const lineGap = 3;
+            const dashLength = 15;
+            const dashGap = 10;
+            
+            // Horizontal yellow dashed lines
+            horizontalRoadPositions.forEach(pixelX => {
+                for (let px = 0; px < 2048; px += dashLength + dashGap) {
+                    chunkCtx.fillRect(px, pixelX - lineWidth - lineGap / 2, dashLength, lineWidth);
+                    chunkCtx.fillRect(px, pixelX + lineGap / 2, dashLength, lineWidth);
+                }
+            });
+            
+            // Vertical yellow dashed lines
+            verticalRoadPositions.forEach(pixelZ => {
+                for (let py = 0; py < 2048; py += dashLength + dashGap) {
+                    chunkCtx.fillRect(pixelZ - lineWidth - lineGap / 2, py, lineWidth, dashLength);
+                    chunkCtx.fillRect(pixelZ + lineGap / 2, py, lineWidth, dashLength);
+                }
+            });
+            
+            // Create texture from canvas
+            const chunkTexture = new THREE.CanvasTexture(chunkCanvas);
+            chunkTexture.minFilter = THREE.LinearFilter;
+            chunkTexture.magFilter = THREE.LinearFilter;
+            chunkTexture.anisotropy = renderer.capabilities.getMaxAnisotropy();
+            const chunkMaterial = new THREE.MeshBasicMaterial({ 
+                map: chunkTexture,
+                side: THREE.DoubleSide
+            });
+            
+            // Create single ground plane for entire chunk
+            const groundGeom = new THREE.PlaneGeometry(CHUNK_SIZE * 2, CHUNK_SIZE * 2);
+            const ground = new THREE.Mesh(groundGeom, chunkMaterial);
+            ground.rotation.x = -Math.PI / 2;
+            ground.position.set(chunkOriginX + CHUNK_SIZE / 2, 0, chunkOriginZ + CHUNK_SIZE / 2);
+            chunkGroup.add(ground);
+            
+            // Generate buildings procedurally based on chunk seed
+            const numBuildings = Math.floor(seededRandom(seed) * 4) + 2;
+            const placedBuildings = []; // Track buildings in this chunk for collision detection
+            
+            for (let i = 0; i < numBuildings; i++) {
+                const buildingSeed = seed + i;
+                const localX = seededRandom(buildingSeed) * CHUNK_SIZE;
+                const localZ = seededRandom(buildingSeed + 1) * CHUNK_SIZE;
+                const worldX = chunkOriginX + localX;
+                const worldZ = chunkOriginZ + localZ;
+                
+                // Skip if too close to roads
+                if ((localX % roadSpacing < 10 || localX % roadSpacing > roadSpacing - 10) ||
+                    (localZ % roadSpacing < 10 || localZ % roadSpacing > roadSpacing - 10)) continue;
+                
+                const width = seededRandom(buildingSeed + 2) * 25 + 15;
+                const depth = seededRandom(buildingSeed + 3) * 25 + 15;
+                const height = seededRandom(buildingSeed + 4) * 60 + 30;
+                
+                // Check for overlap with other buildings
+                let overlaps = false;
+                for (let pb of placedBuildings) {
+                    const distX = Math.abs(worldX - pb.x);
+                    const distZ = Math.abs(worldZ - pb.z);
+                    const minDistX = (width + pb.width) / 2 + 5; // 5 unit buffer
+                    const minDistZ = (depth + pb.depth) / 2 + 5;
+                    
+                    if (distX < minDistX && distZ < minDistZ) {
+                        overlaps = true;
+                        break;
+                    }
+                }
+                
+                if (overlaps) continue;
+                
+                // Store building data for collision checks
+                placedBuildings.push({ x: worldX, z: worldZ, width: width, depth: depth });
+                
+                const buildingGeom = new THREE.BoxGeometry(width, height, depth);
+                const buildingColor = Math.floor(seededRandom(buildingSeed + 5) * 0x888888) + 0x555555;
+                const buildingMat = new THREE.MeshLambertMaterial({ color: buildingColor });
+                const building = new THREE.Mesh(buildingGeom, buildingMat);
+                building.position.set(worldX, height / 2, worldZ);
+                chunkGroup.add(building);
+                buildings.push(building);
+                
+                // Add windows
+                const windowColor = 0xffff99;
+                const windowMat = new THREE.MeshBasicMaterial({ color: windowColor });
+                const windowSize = 2;
+                const windowSpacing = 8;
+                
+                // Front and back windows
+                for (let wx = -width / 2 + 4; wx < width / 2; wx += windowSpacing) {
+                    for (let wy = 8; wy < height - 4; wy += windowSpacing) {
+                        const windowGeom = new THREE.PlaneGeometry(windowSize, windowSize);
+                        const windowMesh = new THREE.Mesh(windowGeom, windowMat);
+                        windowMesh.position.set(worldX + wx, wy, worldZ + depth / 2 + 0.05);
+                        chunkGroup.add(windowMesh);
+                        
+                        const windowGeom2 = new THREE.PlaneGeometry(windowSize, windowSize);
+                        const windowMesh2 = new THREE.Mesh(windowGeom2, windowMat);
+                        windowMesh2.position.set(worldX + wx, wy, worldZ - depth / 2 - 0.05);
+                        chunkGroup.add(windowMesh2);
+                    }
+                }
+                
+                // Left and right windows
+                for (let wz = -depth / 2 + 4; wz < depth / 2; wz += windowSpacing) {
+                    for (let wy = 8; wy < height - 4; wy += windowSpacing) {
+                        const windowGeom = new THREE.PlaneGeometry(windowSize, windowSize);
+                        const windowMesh = new THREE.Mesh(windowGeom, windowMat);
+                        windowMesh.rotation.y = Math.PI / 2;
+                        windowMesh.position.set(worldX - width / 2 - 0.05, wy, worldZ + wz);
+                        chunkGroup.add(windowMesh);
+                        
+                        const windowGeom2 = new THREE.PlaneGeometry(windowSize, windowSize);
+                        const windowMesh2 = new THREE.Mesh(windowGeom2, windowMat);
+                        windowMesh2.rotation.y = Math.PI / 2;
+                        windowMesh2.position.set(worldX + width / 2 + 0.05, wy, worldZ + wz);
+                        chunkGroup.add(windowMesh2);
+                    }
+                }
+            }
+            
+            // Generate trees
+            const numTrees = Math.floor(seededRandom(seed + 100) * 10) + 5;
+            for (let i = 0; i < numTrees; i++) {
+                const treeSeed = seed + 100 + i;
+                const localX = seededRandom(treeSeed) * CHUNK_SIZE;
+                const localZ = seededRandom(treeSeed + 1) * CHUNK_SIZE;
+                const worldX = chunkOriginX + localX;
+                const worldZ = chunkOriginZ + localZ;
+                
+                if ((localX % roadSpacing < 15 || localX % roadSpacing > roadSpacing - 15) ||
+                    (localZ % roadSpacing < 15 || localZ % roadSpacing > roadSpacing - 15)) continue;
+                
+                const tree = new THREE.Mesh(treeGeometry, treeMaterial);
+                tree.position.set(worldX, 5, worldZ);
+                chunkGroup.add(tree);
+                trees.push(tree);
+            }
+
+            // Generate pedestrians
+            const numPeds = Math.floor(seededRandom(seed + 200) * 8) + 4;
+            for (let i = 0; i < numPeds; i++) {
+                const pedSeed = seed + 200 + i;
+                const localX = seededRandom(pedSeed) * CHUNK_SIZE;
+                const localZ = seededRandom(pedSeed + 1) * CHUNK_SIZE;
+                const worldX = chunkOriginX + localX;
+                const worldZ = chunkOriginZ + localZ;
+                
+                // Spawn pedestrians on sidewalks (not on roads)
+                if ((localX % roadSpacing < 20 && localX % roadSpacing > -5) ||
+                    (localZ % roadSpacing < 20 && localZ % roadSpacing > -5)) continue;
+                
+                const ped = createPedestrian();
+                ped.position.set(worldX, 1.5, worldZ);
+                chunkGroup.add(ped);
+                
+                const minX = Math.floor(localX / roadSpacing) * roadSpacing + chunkOriginX;
+                const maxX = minX + roadSpacing;
+                const minZ = Math.floor(localZ / roadSpacing) * roadSpacing + chunkOriginZ;
+                const maxZ = minZ + roadSpacing;
+                
+                pedestrians.push({
+                    mesh: ped,
+                    speed: 0.02 + seededRandom(pedSeed + 2) * 0.03,
+                    directionX: (seededRandom(pedSeed + 3) - 0.5) * 2,
+                    directionZ: (seededRandom(pedSeed + 4) - 0.5) * 2,
+                    minX: minX,
+                    maxX: maxX,
+                    minZ: minZ,
+                    maxZ: maxZ
+                });
+            }
+
+            // Generate AI cars
+            const numChunkCars = Math.floor(seededRandom(seed + 300) * 3) + 1;
+            for (let i = 0; i < numChunkCars; i++) {
+                const carSeed = seed + 300 + i;
+                const carColor = Math.floor(seededRandom(carSeed) * 0xffffff);
+                
+                // Create waypoints along roads (not diagonal)
+                const waypoints = [];
+                
+                // Pick a starting road position
+                const startRoadIdx = Math.floor(seededRandom(carSeed) * 4);
+                const roads = [
+                    { x: chunkOriginX - CHUNK_SIZE / 2, z: chunkOriginZ },
+                    { x: chunkOriginX + CHUNK_SIZE / 2, z: chunkOriginZ },
+                    { x: chunkOriginX, z: chunkOriginZ - CHUNK_SIZE / 2 },
+                    { x: chunkOriginX, z: chunkOriginZ + CHUNK_SIZE / 2 }
+                ];
+                
+                let currentPos = roads[startRoadIdx];
+                waypoints.push({ x: currentPos.x, z: currentPos.z });
+                
+                // Skip if starting position is too close to player spawn (0, 0)
+                const distToOrigin = Math.sqrt(currentPos.x * currentPos.x + currentPos.z * currentPos.z);
+                if (distToOrigin < 30) {
+                    continue; // Skip this AI car
+                }
+                
+                // Generate path along roads (horizontal or vertical movement only)
+                const numWaypoints = 8;
+                
+                for (let j = 0; j < numWaypoints; j++) {
+                    const moveDirection = Math.floor(seededRandom(carSeed + 10 + j) * 2); // 0 = horizontal, 1 = vertical
+                    const distance = (Math.floor(seededRandom(carSeed + 20 + j) * 3) + 1) * roadSpacing;
+                    const sign = seededRandom(carSeed + 30 + j) > 0.5 ? 1 : -1;
+                    
+                    if (moveDirection === 0) {
+                        // Move horizontally
+                        currentPos = { x: currentPos.x + distance * sign, z: currentPos.z };
+                    } else {
+                        // Move vertically
+                        currentPos = { x: currentPos.x, z: currentPos.z + distance * sign };
+                    }
+                    waypoints.push({ x: currentPos.x, z: currentPos.z });
+                }
+                
+                createCar(carColor, function(aiCar) {
+                    const laneOffset = seededRandom(carSeed + 40) > 0.5 ? 5 : -5;
+                    aiCar.position.set(waypoints[0].x, 0.5, waypoints[0].z);
+                    chunkGroup.add(aiCar);
+                    aiCars.push({
+                        mesh: aiCar,
+                        speed: 0.06 + seededRandom(carSeed + 5) * 0.08,
+                        pathIndex: 0,
+                        waypoints: waypoints,
+                        distanceToWaypoint: 0,
+                        laneOffset: laneOffset,
+                        chunkKey: chunkKey
+                    });
+                });
+            }
+            
+            scene.add(chunkGroup);
+            loadedChunks.set(chunkKey, true);
+            chunkObjects.set(chunkKey, chunkGroup);
+        }
+
+        function updateChunks(playerX, playerZ) {
+            const playerChunk = getChunkCoords(playerX, playerZ);
+            const loadRadius = Math.ceil(LOAD_DISTANCE / CHUNK_SIZE);
+            
+            // Generate new chunks near player
+            for (let dx = -loadRadius; dx <= loadRadius; dx++) {
+                for (let dz = -loadRadius; dz <= loadRadius; dz++) {
+                    const chunkX = playerChunk.x + dx;
+                    const chunkZ = playerChunk.z + dz;
+                    generateChunk(chunkX, chunkZ);
+                }
+            }
+            
+            // Remove distant chunks
+            const unloadRadius = Math.ceil(UNLOAD_DISTANCE / CHUNK_SIZE);
+            for (const [key, _] of loadedChunks) {
+                const coords = key.split(',').map(Number);
+                const dx = Math.abs(coords[0] - playerChunk.x);
+                const dz = Math.abs(coords[1] - playerChunk.z);
+                
+                if (dx > unloadRadius || dz > unloadRadius) {
+                    const chunkGroup = chunkObjects.get(key);
+                    scene.remove(chunkGroup);
+                    loadedChunks.delete(key);
+                    chunkObjects.delete(key);
+                    
+                    // Clean up pedestrians in this chunk
+                    for (let i = pedestrians.length - 1; i >= 0; i--) {
+                        const ped = pedestrians[i];
+                        if (chunkGroup.children.includes(ped.mesh)) {
+                            pedestrians.splice(i, 1);
                         }
                     }
-
-                    // Add windows on back face
-                    for (let wx = -width / 2 + 1.5; wx < width / 2; wx += windowSpacing) {
-                        for (let wy = 2; wy < height - 1; wy += windowSpacing) {
-                            const windowGeom = new THREE.PlaneGeometry(windowSize, windowSize);
-                            const windowMesh = new THREE.Mesh(windowGeom, windowMat);
-                            windowMesh.position.set(x + wx, wy, z - depth / 2 - 0.05);
-                            scene.add(windowMesh);
+                    
+                    // Clean up AI cars in this chunk
+                    for (let i = aiCars.length - 1; i >= 0; i--) {
+                        const aiCar = aiCars[i];
+                        if (aiCar.chunkKey === key) {
+                            aiCars.splice(i, 1);
                         }
                     }
-
-                    // Add windows on left face
-                    for (let wz = -depth / 2 + 1.5; wz < depth / 2; wz += windowSpacing) {
-                        for (let wy = 2; wy < height - 1; wy += windowSpacing) {
-                            const windowGeom = new THREE.PlaneGeometry(windowSize, windowSize);
-                            const windowMesh = new THREE.Mesh(windowGeom, windowMat);
-                            windowMesh.rotation.y = Math.PI / 2;
-                            windowMesh.position.set(x - width / 2 - 0.05, wy, z + wz);
-                            scene.add(windowMesh);
+                    
+                    // Clean up arrays
+                    chunkGroup.children.forEach(child => {
+                        if (child.geometry) child.geometry.dispose();
+                        if (child.material) {
+                            if (Array.isArray(child.material)) {
+                                child.material.forEach(m => m.dispose());
+                            } else {
+                                child.material.dispose();
+                            }
                         }
-                    }
-
-                    // Add windows on right face
-                    for (let wz = -depth / 2 + 1.5; wz < depth / 2; wz += windowSpacing) {
-                        for (let wy = 2; wy < height - 1; wy += windowSpacing) {
-                            const windowGeom = new THREE.PlaneGeometry(windowSize, windowSize);
-                            const windowMesh = new THREE.Mesh(windowGeom, windowMat);
-                            windowMesh.rotation.y = Math.PI / 2;
-                            windowMesh.position.set(x + width / 2 + 0.05, wy, z + wz);
-                            scene.add(windowMesh);
-                        }
-                    }
+                    });
                 }
             }
         }
@@ -350,38 +734,38 @@
             const pedGroup = new THREE.Group();
 
             // Body
-            const bodyGeom = new THREE.BoxGeometry(0.4, 1, 0.3);
+            const bodyGeom = new THREE.BoxGeometry(0.6, 1.5, 0.45);
             const bodyMat = new THREE.MeshLambertMaterial({ color: 0x0000ff }); // blue shirt
             const body = new THREE.Mesh(bodyGeom, bodyMat);
             pedGroup.add(body);
 
             // Head
-            const headGeom = new THREE.SphereGeometry(0.2, 8, 8);
+            const headGeom = new THREE.SphereGeometry(0.3, 8, 8);
             const headMat = new THREE.MeshLambertMaterial({ color: 0xffdbac });
             const head = new THREE.Mesh(headGeom, headMat);
-            head.position.y = 0.7;
+            head.position.y = 1.05;
             pedGroup.add(head);
 
             // Arms
-            const armGeom = new THREE.CylinderGeometry(0.05, 0.05, 0.6, 8);
+            const armGeom = new THREE.CylinderGeometry(0.075, 0.075, 0.9, 8);
             const armMat = new THREE.MeshLambertMaterial({ color: 0xffdbac });
             const leftArm = new THREE.Mesh(armGeom, armMat);
-            leftArm.position.set(-0.3, 0.2, 0);
+            leftArm.position.set(-0.45, 0.3, 0);
             leftArm.rotation.z = Math.PI / 6;
             pedGroup.add(leftArm);
             const rightArm = new THREE.Mesh(armGeom, armMat);
-            rightArm.position.set(0.3, 0.2, 0);
+            rightArm.position.set(0.45, 0.3, 0);
             rightArm.rotation.z = -Math.PI / 6;
             pedGroup.add(rightArm);
 
             // Legs
-            const legGeom = new THREE.CylinderGeometry(0.06, 0.06, 0.8, 8);
+            const legGeom = new THREE.CylinderGeometry(0.09, 0.09, 1.2, 8);
             const legMat = new THREE.MeshLambertMaterial({ color: 0x000000 }); // black pants
             const leftLeg = new THREE.Mesh(legGeom, legMat);
-            leftLeg.position.set(-0.1, -0.6, 0);
+            leftLeg.position.set(-0.15, -0.9, 0);
             pedGroup.add(leftLeg);
             const rightLeg = new THREE.Mesh(legGeom, legMat);
-            rightLeg.position.set(0.1, -0.6, 0);
+            rightLeg.position.set(0.15, -0.9, 0);
             pedGroup.add(rightLeg);
 
             return pedGroup;
@@ -392,94 +776,13 @@
         createCar(function(loadedCar) {
             car = loadedCar;
             scene.add(car);
+            
+            // Initialize chunks around starting position
+            updateChunks(0, 0);
         });
 
         // AI Cars
         const aiCars = [];
-        
-        // Define waypoint paths for AI cars - constrained to roads at x: -100, -50, 0, 50, 100, 150 and z: -100, -50, 0, 50, 100, 150
-        const aiCarPaths = [
-            // Car 1: outer loop on road perimeter
-            [
-                { x: -100, z: -100 }, { x: -50, z: -100 }, { x: 0, z: -100 }, { x: 50, z: -100 }, { x: 100, z: -100 }, { x: 150, z: -100 },
-                { x: 150, z: -50 }, { x: 150, z: 0 }, { x: 150, z: 50 }, { x: 150, z: 100 }, { x: 150, z: 150 },
-                { x: 100, z: 150 }, { x: 50, z: 150 }, { x: 0, z: 150 }, { x: -50, z: 150 }, { x: -100, z: 150 },
-                { x: -100, z: 100 }, { x: -100, z: 50 }, { x: -100, z: 0 }, { x: -100, z: -50 }
-            ],
-            // Car 2: middle roads loop
-            [
-                { x: -50, z: -50 }, { x: 0, z: -50 }, { x: 50, z: -50 }, { x: 100, z: -50 },
-                { x: 100, z: 0 }, { x: 100, z: 50 }, { x: 100, z: 100 },
-                { x: 50, z: 100 }, { x: 0, z: 100 }, { x: -50, z: 100 },
-                { x: -50, z: 50 }, { x: -50, z: 0 }
-            ],
-            // Car 3: inner roads
-            [
-                { x: 0, z: 0 }, { x: 50, z: 0 }, { x: 50, z: 50 }, { x: 0, z: 50 }
-            ]
-        ];
-        
-        // Create AI cars with waypoint paths
-        const colors = [0x00ff00, 0x0000ff, 0xffff00]; // green, blue, yellow
-        for (let i = 0; i < 3; i++) {
-            (function(index) {
-                createCar(colors[index], function(aiCar) {
-                    aiCar.position.set(aiCarPaths[index][0].x, 0.5, aiCarPaths[index][0].z);
-                    scene.add(aiCar);
-                    aiCars.push({
-                        mesh: aiCar,
-                        speed: 0.08 + Math.random() * 0.05,
-                        pathIndex: 0,
-                        waypoints: aiCarPaths[index],
-                        distanceToWaypoint: 0
-                    });
-                });
-            })(i);
-        }
-
-        // Trees
-        const treeGeometry = new THREE.ConeGeometry(0.5, 1, 4);
-        const treeMaterial = new THREE.MeshBasicMaterial({ color: 0x228822 });
-        const trees = [];
-        for (let i = 0; i < roadPositions.length - 1; i++) {
-            for (let j = 0; j < roadPositions.length - 1; j++) {
-                const xMin = roadPositions[i];
-                const xMax = roadPositions[i + 1];
-                const zMin = roadPositions[j];
-                const zMax = roadPositions[j + 1];
-                const xMinBlock = xMin + 10;
-                const xMaxBlock = xMax - 10;
-                const zMinBlock = zMin + 10;
-                const zMaxBlock = zMax - 10;
-                const numTrees = Math.floor(Math.random() * 3); // 0-2 trees per block
-                for (let k = 0; k < numTrees; k++) {
-                    const x = xMinBlock + Math.random() * (xMaxBlock - xMinBlock);
-                    const z = zMinBlock + Math.random() * (zMaxBlock - zMinBlock);
-                    const tree = new THREE.Mesh(treeGeometry, treeMaterial);
-                    tree.position.set(x, 1, z);
-                    scene.add(tree);
-                    trees.push(tree);
-                }
-                const numPeds = Math.floor(Math.random() * 3) + 1; // 1-3 pedestrians per block
-                for (let p = 0; p < numPeds; p++) {
-                    const x = xMinBlock + Math.random() * (xMaxBlock - xMinBlock);
-                    const z = zMinBlock + Math.random() * (zMaxBlock - zMinBlock);
-                    const ped = createPedestrian();
-                    ped.position.set(x, 0, z);
-                    scene.add(ped);
-                    pedestrians.push({
-                        mesh: ped,
-                        speed: 0.02 + Math.random() * 0.03,
-                        directionX: (Math.random() - 0.5) * 2,
-                        directionZ: (Math.random() - 0.5) * 2,
-                        minX: xMinBlock,
-                        maxX: xMaxBlock,
-                        minZ: zMinBlock,
-                        maxZ: zMaxBlock
-                    });
-                }
-            }
-        }
 
         // Controls
         let targetSpeed = 0;
@@ -490,6 +793,10 @@
         const rotAcceleration = 0.1;
         const maxSpeed = 0.5;
         let isFirstPerson = false;
+        let lastFrameTime = performance.now();
+        let frameCount = 0;
+        let fpsUpdateTime = 0;
+        let killCount = 0;
 
         // Reset function
         function resetGame() {
@@ -502,12 +809,18 @@
             targetRotation = 0;
             currentSpeed = 0;
             currentRotation = 0;
+            
+            // Reset kill counter
+            killCount = 0;
+            document.getElementById('kill-counter').textContent = 'Pedestrians Hit: 0';
 
             // Reset AI cars
-            aiCars.forEach((aiCar, index) => {
-                aiCar.mesh.position.set(aiCarPaths[index][0].x, 0.5, aiCarPaths[index][0].z);
-                aiCar.mesh.rotation.set(0, 0, 0);
-                aiCar.pathIndex = 0;
+            aiCars.forEach((aiCar) => {
+                if (aiCar.waypoints && aiCar.waypoints.length > 0) {
+                    aiCar.mesh.position.set(aiCar.waypoints[0].x, 0.5, aiCar.waypoints[0].z);
+                    aiCar.mesh.rotation.set(0, 0, 0);
+                    aiCar.pathIndex = 0;
+                }
             });
         }
 
@@ -594,7 +907,24 @@
         function animate() {
             requestAnimationFrame(animate);
 
+            // Calculate FPS
+            const currentTime = performance.now();
+            const deltaTime = currentTime - lastFrameTime;
+            lastFrameTime = currentTime;
+            frameCount++;
+            fpsUpdateTime += deltaTime;
+            
+            if (fpsUpdateTime >= 500) {
+                const fps = Math.round((frameCount * 1000) / fpsUpdateTime);
+                document.getElementById('fps-counter').textContent = `FPS: ${fps}`;
+                frameCount = 0;
+                fpsUpdateTime = 0;
+            }
+
             if (!car) return;
+
+            // Update chunks based on player position
+            updateChunks(car.position.x, car.position.z);
 
             // Update current speed and rotation
             currentSpeed += (targetSpeed - currentSpeed) * acceleration;
@@ -619,25 +949,46 @@
                     break;
                 }
             }
-            for (let building of buildings) {
-                const buildingBox = new THREE.Box3().setFromObject(building);
-                if (carBox.intersectsBox(buildingBox)) {
-                    collided = true;
-                    break;
+            if (!collided) {
+                for (let building of buildings) {
+                    const buildingBox = new THREE.Box3().setFromObject(building);
+                    if (carBox.intersectsBox(buildingBox)) {
+                        collided = true;
+                        break;
+                    }
                 }
             }
-            for (let aiCar of aiCars) {
-                const aiBox = new THREE.Box3().setFromObject(aiCar.mesh);
-                if (carBox.intersectsBox(aiBox)) {
-                    collided = true;
-                    break;
+            if (!collided) {
+                for (let aiCar of aiCars) {
+                    const aiBox = new THREE.Box3().setFromObject(aiCar.mesh);
+                    if (carBox.intersectsBox(aiBox)) {
+                        collided = true;
+                        break;
+                    }
                 }
             }
-            for (let ped of pedestrians) {
-                const pedBox = new THREE.Box3().setFromObject(ped.mesh);
-                if (carBox.intersectsBox(pedBox)) {
-                    collided = true;
-                    break;
+            if (!collided) {
+                for (let i = pedestrians.length - 1; i >= 0; i--) {
+                    const ped = pedestrians[i];
+                    const pedBox = new THREE.Box3().setFromObject(ped.mesh);
+                    if (carBox.intersectsBox(pedBox)) {
+                        collided = true;
+                        // Remove pedestrian from its parent (chunkGroup)
+                        if (ped.mesh.parent) {
+                            ped.mesh.parent.remove(ped.mesh);
+                        }
+                        pedestrians.splice(i, 1);
+                        // Increment kill counter
+                        killCount++;
+                        document.getElementById('kill-counter').textContent = 'Pedestrians Hit: ' + killCount;
+                        // Flash red
+                        const redFlash = document.getElementById('red-flash');
+                        redFlash.style.opacity = '1';
+                        setTimeout(() => {
+                            redFlash.style.opacity = '0';
+                        }, 150);
+                        break;
+                    }
                 }
             }
             if (collided) {
@@ -674,8 +1025,24 @@
                 const currentWaypoint = aiCar.waypoints[aiCar.pathIndex];
                 const nextWaypoint = aiCar.waypoints[(aiCar.pathIndex + 1) % aiCar.waypoints.length];
                 
-                const dirX = nextWaypoint.x - aiCar.mesh.position.x;
-                const dirZ = nextWaypoint.z - aiCar.mesh.position.z;
+                // Calculate target position with lane offset
+                let targetX = nextWaypoint.x;
+                let targetZ = nextWaypoint.z;
+                
+                // Apply lane offset based on travel direction
+                const waypointDirX = nextWaypoint.x - currentWaypoint.x;
+                const waypointDirZ = nextWaypoint.z - currentWaypoint.z;
+                
+                if (Math.abs(waypointDirX) > Math.abs(waypointDirZ)) {
+                    // Mostly horizontal travel - offset in Z direction
+                    targetZ += aiCar.laneOffset;
+                } else {
+                    // Mostly vertical travel - offset in X direction
+                    targetX += aiCar.laneOffset;
+                }
+                
+                const dirX = targetX - aiCar.mesh.position.x;
+                const dirZ = targetZ - aiCar.mesh.position.z;
                 const distance = Math.sqrt(dirX * dirX + dirZ * dirZ);
                 
                 if (distance < 2) {
@@ -717,4 +1084,4 @@
         });
     </script>
 </body>
-</html>
+</html>w

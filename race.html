@@ -59,6 +59,27 @@
         #view-toggle:active {
             background: rgba(30, 70, 150, 0.9);
         }
+        #exit-car-button {
+            position: absolute;
+            top: 60px;
+            right: 20px;
+            padding: 10px 20px;
+            background: rgba(50, 200, 50, 0.8);
+            color: white;
+            border: 2px solid white;
+            border-radius: 5px;
+            font-family: Arial, sans-serif;
+            font-size: 16px;
+            font-weight: bold;
+            cursor: pointer;
+            transition: background 0.2s;
+        }
+        #exit-car-button:hover {
+            background: rgba(80, 255, 80, 0.9);
+        }
+        #exit-car-button:active {
+            background: rgba(30, 150, 30, 0.9);
+        }
         #controls-container {
             position: absolute;
             bottom: 20px;
@@ -145,12 +166,16 @@
         <strong>Controls:</strong><br>
         ↑↓ Keys or WASD: Forward/Backward<br>
         ← → Keys or AD: Left/Right<br>
+        E: Exit/Enter Car (when near car)<br>
+        Mouse: Click to enable camera control<br>
+        ESC: Release mouse control<br>
         Avoid cars, buildings, trees, and pedestrians!
     </div>
     <div id="fps-counter">FPS: 0</div>
     <div id="red-flash"></div>
     <div id="kill-counter">Pedestrians Hit: 0</div>
     <button id="view-toggle">1ST PERSON</button>
+    <button id="exit-car-button">EXIT CAR (E)</button>
     <button id="reset-button">RESET</button>
     <div id="controls-container">
         <button class="control-button" id="btn-forward">▲</button>
@@ -773,9 +798,19 @@
 
         // Player car
         let car;
+        let playerPedestrian = null;
+        let isInCar = true;
+        const playerPedSpeed = 0.15; // Direct speed for pedestrian movement
+        
         createCar(function(loadedCar) {
             car = loadedCar;
             scene.add(car);
+            
+            // Create player pedestrian (initially hidden)
+            playerPedestrian = createPedestrian();
+            playerPedestrian.position.set(0, 1.5, 0);
+            playerPedestrian.visible = false;
+            scene.add(playerPedestrian);
             
             // Initialize chunks around starting position
             updateChunks(0, 0);
@@ -797,10 +832,71 @@
         let frameCount = 0;
         let fpsUpdateTime = 0;
         let killCount = 0;
+        
+        // Mouse camera controls
+        let mouseYaw = 0; // Horizontal rotation
+        let mousePitch = 0; // Vertical rotation
+        const mouseSensitivity = 0.002;
+        const maxPitch = Math.PI / 3; // Limit looking up/down
+        let isPointerLocked = false;
 
+        // Exit/Enter car function
+        function toggleCarMode() {
+            if (!car || !playerPedestrian) return;
+            
+            if (isInCar) {
+                // Exit car - must be stopped
+                if (Math.abs(currentSpeed) < 0.01) {
+                    isInCar = false;
+                    car.visible = true; // Keep car visible
+                    playerPedestrian.visible = true;
+                    // Place pedestrian near car
+                    const exitDistance = 3;
+                    playerPedestrian.position.x = car.position.x + Math.sin(car.rotation.y + Math.PI / 2) * exitDistance;
+                    playerPedestrian.position.z = car.position.z + Math.cos(car.rotation.y + Math.PI / 2) * exitDistance;
+                    playerPedestrian.position.y = 1.5;
+                    // Reset speeds
+                    targetSpeed = 0;
+                    currentSpeed = 0;
+                    targetRotation = 0;
+                    currentRotation = 0;
+                    // Update UI
+                    document.getElementById('exit-car-button').textContent = 'ENTER CAR (E)';
+                }
+            } else {
+                // Enter car - must be near car
+                const distanceToCar = Math.sqrt(
+                    Math.pow(playerPedestrian.position.x - car.position.x, 2) +
+                    Math.pow(playerPedestrian.position.z - car.position.z, 2)
+                );
+                if (distanceToCar < 5) {
+                    isInCar = true;
+                    playerPedestrian.visible = false;
+                    // Update UI
+                    document.getElementById('exit-car-button').textContent = 'EXIT CAR (E)';
+                    if (isFirstPerson) {
+                        car.visible = false;
+                    } else {
+                        car.visible = true;
+                    }
+                }
+            }
+        }
+        
         // Reset function
         function resetGame() {
             if (!car) return;
+            
+            // Reset to car mode
+            isInCar = true;
+            if (playerPedestrian) {
+                playerPedestrian.visible = false;
+            }
+            car.visible = true;
+            if (isFirstPerson) {
+                car.visible = false;
+            }
+            document.getElementById('exit-car-button').textContent = 'EXIT CAR (E)';
             
             // Reset player car
             car.position.set(0, 0.5, 0);
@@ -826,16 +922,49 @@
 
         // Add reset button listener
         document.getElementById('reset-button').addEventListener('click', resetGame);
+        
+        // Add exit/enter car button listener
+        document.getElementById('exit-car-button').addEventListener('click', toggleCarMode);
+        
+        // Pointer lock for mouse camera control
+        renderer.domElement.addEventListener('click', function() {
+            renderer.domElement.requestPointerLock();
+        });
+        
+        document.addEventListener('pointerlockchange', function() {
+            isPointerLocked = document.pointerLockElement === renderer.domElement;
+        });
+        
+        // Mouse movement for camera control
+        document.addEventListener('mousemove', function(event) {
+            if (!isPointerLocked) return;
+            
+            mouseYaw -= event.movementX * mouseSensitivity;
+            mousePitch -= event.movementY * mouseSensitivity;
+            
+            // Clamp pitch to prevent over-rotation
+            mousePitch = Math.max(-maxPitch, Math.min(maxPitch, mousePitch));
+        });
 
         // First person toggle
         document.getElementById('view-toggle').addEventListener('click', function() {
             isFirstPerson = !isFirstPerson;
-            if (car) car.visible = !isFirstPerson;
+            if (isInCar) {
+                if (car) car.visible = !isFirstPerson;
+            } else {
+                if (playerPedestrian) playerPedestrian.visible = !isFirstPerson;
+            }
             this.textContent = isFirstPerson ? '3RD PERSON' : '1ST PERSON';
         });
 
         document.addEventListener('keydown', (event) => {
-            if (event.key === 'ArrowUp' || event.key === 'w' || event.key === 'W') {
+            if (event.key === 'Escape') {
+                if (isPointerLocked) {
+                    document.exitPointerLock();
+                }
+            } else if (event.key === 'e' || event.key === 'E') {
+                toggleCarMode();
+            } else if (event.key === 'ArrowUp' || event.key === 'w' || event.key === 'W') {
                 targetSpeed = maxSpeed;
             } else if (event.key === 'ArrowDown' || event.key === 's' || event.key === 'S') {
                 targetSpeed = -maxSpeed;
@@ -845,7 +974,11 @@
                 targetRotation = -0.05;
             } else if (event.key === 'p' || event.key === 'P') {
                 isFirstPerson = !isFirstPerson;
-                if (car) car.visible = !isFirstPerson;
+                if (isInCar) {
+                    if (car) car.visible = !isFirstPerson;
+                } else {
+                    if (playerPedestrian) playerPedestrian.visible = !isFirstPerson;
+                }
                 document.getElementById('view-toggle').textContent = isFirstPerson ? '3RD PERSON' : '1ST PERSON';
             }
         });
@@ -924,100 +1057,241 @@
             if (!car) return;
 
             // Update chunks based on player position
-            updateChunks(car.position.x, car.position.z);
+            const playerX = isInCar ? car.position.x : playerPedestrian.position.x;
+            const playerZ = isInCar ? car.position.z : playerPedestrian.position.z;
+            updateChunks(playerX, playerZ);
 
-            // Update current speed and rotation
-            currentSpeed += (targetSpeed - currentSpeed) * acceleration;
-            currentRotation += (targetRotation - currentRotation) * rotAcceleration;
+            if (isInCar) {
+                // Car mode - with acceleration
+                // Update current speed and rotation
+                currentSpeed += (targetSpeed - currentSpeed) * acceleration;
+                currentRotation += (targetRotation - currentRotation) * rotAcceleration;
 
-            // Update car rotation
-            car.rotation.y += currentRotation;
+                // Update car rotation
+                car.rotation.y += currentRotation;
 
-            // Move the car based on its rotation
-            const moveX = Math.sin(car.rotation.y) * currentSpeed;
-            const moveZ = Math.cos(car.rotation.y) * currentSpeed;
-            car.position.x += moveX;
-            car.position.z += moveZ;
+                // Move the car based on its rotation
+                const moveX = Math.sin(car.rotation.y) * currentSpeed;
+                const moveZ = Math.cos(car.rotation.y) * currentSpeed;
+                car.position.x += moveX;
+                car.position.z += moveZ;
+            } else {
+                // Pedestrian mode - direct movement relative to camera direction
+                let moveX = 0;
+                let moveZ = 0;
+                
+                // Calculate movement relative to where player is looking (mouseYaw)
+                if (targetSpeed > 0) {
+                    // Move forward in look direction
+                    moveX = Math.sin(mouseYaw) * playerPedSpeed;
+                    moveZ = Math.cos(mouseYaw) * playerPedSpeed;
+                } else if (targetSpeed < 0) {
+                    // Move backward from look direction
+                    moveX = -Math.sin(mouseYaw) * playerPedSpeed;
+                    moveZ = -Math.cos(mouseYaw) * playerPedSpeed;
+                }
+                
+                if (targetRotation > 0) {
+                    // Strafe left relative to look direction
+                    moveX += Math.sin(mouseYaw + Math.PI / 2) * playerPedSpeed;
+                    moveZ += Math.cos(mouseYaw + Math.PI / 2) * playerPedSpeed;
+                } else if (targetRotation < 0) {
+                    // Strafe right relative to look direction
+                    moveX += Math.sin(mouseYaw - Math.PI / 2) * playerPedSpeed;
+                    moveZ += Math.cos(mouseYaw - Math.PI / 2) * playerPedSpeed;
+                }
+                
+                // Normalize diagonal movement
+                const moveMagnitude = Math.sqrt(moveX * moveX + moveZ * moveZ);
+                if (moveMagnitude > playerPedSpeed) {
+                    moveX = (moveX / moveMagnitude) * playerPedSpeed;
+                    moveZ = (moveZ / moveMagnitude) * playerPedSpeed;
+                }
+                
+                playerPedestrian.position.x += moveX;
+                playerPedestrian.position.z += moveZ;
+            }
 
             // Collision detection
-            const carBox = new THREE.Box3().setFromObject(car);
-            let collided = false;
-            for (let tree of trees) {
-                const treeBox = new THREE.Box3().setFromObject(tree);
-                if (carBox.intersectsBox(treeBox)) {
-                    collided = true;
-                    break;
-                }
-            }
-            if (!collided) {
-                for (let building of buildings) {
-                    const buildingBox = new THREE.Box3().setFromObject(building);
-                    if (carBox.intersectsBox(buildingBox)) {
+            if (isInCar) {
+                const carBox = new THREE.Box3().setFromObject(car);
+                let collided = false;
+                const moveX = Math.sin(car.rotation.y) * currentSpeed;
+                const moveZ = Math.cos(car.rotation.y) * currentSpeed;
+                
+                for (let tree of trees) {
+                    const treeBox = new THREE.Box3().setFromObject(tree);
+                    if (carBox.intersectsBox(treeBox)) {
                         collided = true;
                         break;
                     }
                 }
-            }
-            if (!collided) {
-                for (let aiCar of aiCars) {
-                    const aiBox = new THREE.Box3().setFromObject(aiCar.mesh);
-                    if (carBox.intersectsBox(aiBox)) {
-                        collided = true;
-                        break;
-                    }
-                }
-            }
-            if (!collided) {
-                for (let i = pedestrians.length - 1; i >= 0; i--) {
-                    const ped = pedestrians[i];
-                    const pedBox = new THREE.Box3().setFromObject(ped.mesh);
-                    if (carBox.intersectsBox(pedBox)) {
-                        collided = true;
-                        // Remove pedestrian from its parent (chunkGroup)
-                        if (ped.mesh.parent) {
-                            ped.mesh.parent.remove(ped.mesh);
+                if (!collided) {
+                    for (let building of buildings) {
+                        const buildingBox = new THREE.Box3().setFromObject(building);
+                        if (carBox.intersectsBox(buildingBox)) {
+                            collided = true;
+                            break;
                         }
-                        pedestrians.splice(i, 1);
-                        // Increment kill counter
-                        killCount++;
-                        document.getElementById('kill-counter').textContent = 'Pedestrians Hit: ' + killCount;
-                        // Flash red
-                        const redFlash = document.getElementById('red-flash');
-                        redFlash.style.opacity = '1';
-                        setTimeout(() => {
-                            redFlash.style.opacity = '0';
-                        }, 150);
+                    }
+                }
+                if (!collided) {
+                    for (let aiCar of aiCars) {
+                        const aiBox = new THREE.Box3().setFromObject(aiCar.mesh);
+                        if (carBox.intersectsBox(aiBox)) {
+                            collided = true;
+                            break;
+                        }
+                    }
+                }
+                if (!collided) {
+                    for (let i = pedestrians.length - 1; i >= 0; i--) {
+                        const ped = pedestrians[i];
+                        const pedBox = new THREE.Box3().setFromObject(ped.mesh);
+                        if (carBox.intersectsBox(pedBox)) {
+                            collided = true;
+                            // Remove pedestrian from its parent (chunkGroup)
+                            if (ped.mesh.parent) {
+                                ped.mesh.parent.remove(ped.mesh);
+                            }
+                            pedestrians.splice(i, 1);
+                            // Increment kill counter
+                            killCount++;
+                            document.getElementById('kill-counter').textContent = 'Pedestrians Hit: ' + killCount;
+                            // Flash red
+                            const redFlash = document.getElementById('red-flash');
+                            redFlash.style.opacity = '1';
+                            setTimeout(() => {
+                                redFlash.style.opacity = '0';
+                            }, 150);
+                            break;
+                        }
+                    }
+                }
+                if (collided) {
+                    car.position.x -= moveX;
+                    car.position.z -= moveZ;
+                    currentSpeed = 0;
+                }
+            } else {
+                // Pedestrian mode - collision detection
+                const pedBox = new THREE.Box3().setFromObject(playerPedestrian);
+                let collided = false;
+                let lastMoveX = 0;
+                let lastMoveZ = 0;
+                
+                // Calculate same movement as above for collision rollback
+                if (targetSpeed > 0) {
+                    lastMoveX = Math.sin(mouseYaw) * playerPedSpeed;
+                    lastMoveZ = Math.cos(mouseYaw) * playerPedSpeed;
+                } else if (targetSpeed < 0) {
+                    lastMoveX = -Math.sin(mouseYaw) * playerPedSpeed;
+                    lastMoveZ = -Math.cos(mouseYaw) * playerPedSpeed;
+                }
+                
+                if (targetRotation > 0) {
+                    lastMoveX += Math.sin(mouseYaw + Math.PI / 2) * playerPedSpeed;
+                    lastMoveZ += Math.cos(mouseYaw + Math.PI / 2) * playerPedSpeed;
+                } else if (targetRotation < 0) {
+                    lastMoveX += Math.sin(mouseYaw - Math.PI / 2) * playerPedSpeed;
+                    lastMoveZ += Math.cos(mouseYaw - Math.PI / 2) * playerPedSpeed;
+                }
+                
+                const moveMagnitude = Math.sqrt(lastMoveX * lastMoveX + lastMoveZ * lastMoveZ);
+                if (moveMagnitude > playerPedSpeed) {
+                    lastMoveX = (lastMoveX / moveMagnitude) * playerPedSpeed;
+                    lastMoveZ = (lastMoveZ / moveMagnitude) * playerPedSpeed;
+                }
+                
+                for (let tree of trees) {
+                    const treeBox = new THREE.Box3().setFromObject(tree);
+                    if (pedBox.intersectsBox(treeBox)) {
+                        collided = true;
                         break;
                     }
                 }
-            }
-            if (collided) {
-                car.position.x -= moveX;
-                car.position.z -= moveZ;
-                currentSpeed = 0;
+                if (!collided) {
+                    for (let building of buildings) {
+                        const buildingBox = new THREE.Box3().setFromObject(building);
+                        if (pedBox.intersectsBox(buildingBox)) {
+                            collided = true;
+                            break;
+                        }
+                    }
+                }
+                if (!collided) {
+                    for (let aiCar of aiCars) {
+                        const aiBox = new THREE.Box3().setFromObject(aiCar.mesh);
+                        if (pedBox.intersectsBox(aiBox)) {
+                            collided = true;
+                            break;
+                        }
+                    }
+                }
+                if (collided) {
+                    playerPedestrian.position.x -= lastMoveX;
+                    playerPedestrian.position.z -= lastMoveZ;
+                }
             }
 
-            // Update camera position to follow the car
-            if (isFirstPerson) {
-                // First person view - positioned as if sitting in driver's seat
-                const driverOffsetX = Math.sin(car.rotation.y) * 0.3;
-                const driverOffsetZ = Math.cos(car.rotation.y) * 0.3;
-                camera.position.x = car.position.x + driverOffsetX;
-                camera.position.z = car.position.z + driverOffsetZ;
-                camera.position.y = car.position.y + 1.2;
-                
-                // Look ahead in the direction of movement
-                const lookAheadDistance = 8;
-                const lookX = car.position.x + Math.sin(car.rotation.y) * lookAheadDistance;
-                const lookZ = car.position.z + Math.cos(car.rotation.y) * lookAheadDistance;
-                camera.lookAt(lookX, car.position.y + 0.8, lookZ);
+            // Update camera position to follow the player
+            if (isInCar) {
+                // Car camera
+                if (isFirstPerson) {
+                    // First person view - positioned as if sitting in driver's seat
+                    car.visible = false;
+                    const driverOffsetX = Math.sin(car.rotation.y) * 0.3;
+                    const driverOffsetZ = Math.cos(car.rotation.y) * 0.3;
+                    camera.position.x = car.position.x + driverOffsetX;
+                    camera.position.z = car.position.z + driverOffsetZ;
+                    camera.position.y = car.position.y + 1.2;
+                    
+                    // Apply mouse rotation for free look
+                    const lookDistance = 8;
+                    const totalYaw = car.rotation.y + mouseYaw;
+                    const lookX = car.position.x + Math.sin(totalYaw) * Math.cos(mousePitch) * lookDistance;
+                    const lookZ = car.position.z + Math.cos(totalYaw) * Math.cos(mousePitch) * lookDistance;
+                    const lookY = car.position.y + 0.8 + Math.sin(mousePitch) * lookDistance;
+                    camera.lookAt(lookX, lookY, lookZ);
+                } else {
+                    // Third person view with mouse control
+                    car.visible = true;
+                    const offset = 10;
+                    const orbitYaw = mouseYaw;
+                    const orbitPitch = mousePitch * 0.5; // Less dramatic pitch in third person
+                    
+                    camera.position.x = car.position.x - Math.sin(orbitYaw) * offset * Math.cos(orbitPitch);
+                    camera.position.z = car.position.z - Math.cos(orbitYaw) * offset * Math.cos(orbitPitch);
+                    camera.position.y = 10 + Math.sin(orbitPitch) * offset;
+                    camera.lookAt(car.position.x, car.position.y, car.position.z);
+                }
             } else {
-                // Third person view
-                const offset = 10;
-                camera.position.x = car.position.x;
-                camera.position.z = car.position.z - offset;
-                camera.position.y = 10;
-                camera.lookAt(car.position);
+                // Pedestrian camera
+                if (isFirstPerson) {
+                    // First person view - positioned at eye level with mouse look
+                    playerPedestrian.visible = false;
+                    camera.position.x = playerPedestrian.position.x;
+                    camera.position.z = playerPedestrian.position.z;
+                    camera.position.y = playerPedestrian.position.y + 0.5;
+                    
+                    // Apply mouse rotation for free look
+                    const lookDistance = 8;
+                    const lookX = playerPedestrian.position.x + Math.sin(mouseYaw) * Math.cos(mousePitch) * lookDistance;
+                    const lookZ = playerPedestrian.position.z + Math.cos(mouseYaw) * Math.cos(mousePitch) * lookDistance;
+                    const lookY = playerPedestrian.position.y + 0.5 + Math.sin(mousePitch) * lookDistance;
+                    camera.lookAt(lookX, lookY, lookZ);
+                } else {
+                    // Third person view with mouse control
+                    playerPedestrian.visible = true;
+                    const offset = 8;
+                    const orbitYaw = mouseYaw;
+                    const orbitPitch = mousePitch * 0.5;
+                    
+                    camera.position.x = playerPedestrian.position.x - Math.sin(orbitYaw) * offset * Math.cos(orbitPitch);
+                    camera.position.z = playerPedestrian.position.z - Math.cos(orbitYaw) * offset * Math.cos(orbitPitch);
+                    camera.position.y = 8 + Math.sin(orbitPitch) * offset;
+                    camera.lookAt(playerPedestrian.position.x, playerPedestrian.position.y, playerPedestrian.position.z);
+                }
             }
 
             // Update AI cars

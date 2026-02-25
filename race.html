@@ -977,13 +977,11 @@
             const mtlLoader = new THREE.MTLLoader();
             mtlLoader.load('car_long_red.mtl', 
                 function(materials) {
-                    console.log('MTL loaded successfully');
                     materials.preload();
                     const objLoader = new THREE.OBJLoader();
                     objLoader.setMaterials(materials);
                     objLoader.load('car_long_red.obj', 
                         function(object) {
-                            console.log('OBJ loaded successfully');
                             object.scale.set(1.5, 1.5, 1.5);
                             object.position.y = 0.5;
 
@@ -1004,20 +1002,8 @@
 
                             callback(object);
                         },
-                        function(progress) {
-                            console.log('OBJ loading progress:', progress.loaded / progress.total);
-                        },
-                        function(error) {
-                            console.error('Error loading OBJ:', error);
-                        }
                     );
                 },
-                function(progress) {
-                    console.log('MTL loading progress:', progress.loaded / progress.total);
-                },
-                function(error) {
-                    console.error('Error loading MTL:', error);
-                }
             );
         }
 

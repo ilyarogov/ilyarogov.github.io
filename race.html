@@ -159,9 +159,131 @@
             padding: 8px 15px;
             border-radius: 5px;
         }
+        #dashboard {
+            position: fixed;
+            bottom: 0;
+            left: 0;
+            width: 100%;
+            height: 200px;
+            background: linear-gradient(to top, rgba(0, 0, 0, 0.8), rgba(20, 20, 20, 0.7));
+            display: none;
+            flex-direction: row;
+            align-items: center;
+            justify-content: space-around;
+            padding: 20px;
+            box-sizing: border-box;
+            border-top: 2px solid rgba(100, 100, 100, 0.5);
+        }
+        #dashboard.visible {
+            display: flex;
+        }
+        .dashboard-section {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            color: #00ff00;
+            font-family: 'Courier New', monospace;
+            text-shadow: 0 0 10px #00ff00;
+        }
+        #speedometer-container {
+            position: relative;
+            width: 150px;
+            height: 150px;
+        }
+        #speedometer-canvas {
+            width: 100%;
+            height: 100%;
+            display: block;
+        }
+        .speedometer-label {
+            position: absolute;
+            font-size: 12px;
+            color: #00ff00;
+        }
+        .speed-value {
+            font-size: 24px;
+            font-weight: bold;
+            margin-top: 30px;
+            color: #00ff00;
+        }
+        #steering-wheel-container {
+            position: relative;
+            width: 120px;
+            height: 120px;
+        }
+        #steering-wheel {
+            width: 100%;
+            height: 100%;
+            border-radius: 50%;
+            border: 4px solid #444;
+            background: radial-gradient(circle at 30% 30%, rgba(100, 100, 100, 0.6), rgba(40, 40, 40, 0.9));
+            position: relative;
+        }
+        #steering-wheel::before {
+            content: '';
+            position: absolute;
+            width: 8px;
+            height: 40px;
+            background: #888;
+            top: 10px;
+            left: 50%;
+            margin-left: -4px;
+        }
+        #steering-wheel::after {
+            content: '';
+            position: absolute;
+            width: 8px;
+            height: 8px;
+            background: #00ff00;
+            border-radius: 50%;
+            top: 50%;
+            left: 50%;
+            margin-left: -4px;
+            margin-top: -4px;
+            box-shadow: 0 0 5px #00ff00;
+        }
+        #radio-display {
+            border: 2px solid #00ff00;
+            padding: 15px 25px;
+            background: rgba(0, 30, 0, 0.9);
+            border-radius: 3px;
+            min-width: 200px;
+            text-align: center;
+        }
+        #radio-station {
+            font-size: 16px;
+            margin-bottom: 5px;
+            font-weight: bold;
+        }
+        #radio-frequency {
+            font-size: 12px;
+            opacity: 0.7;
+        }
     </style>
 </head>
 <body>
+    <div id="dashboard">
+        <div class="dashboard-section">
+            <div id="speedometer-container">
+                <canvas id="speedometer-canvas" width="150" height="150"></canvas>
+            </div>
+            <div class="speed-value">
+                <span id="speed-text">0</span> mph
+            </div>
+        </div>
+        <div class="dashboard-section">
+            <div id="steering-wheel-container">
+                <div id="steering-wheel"></div>
+            </div>
+        </div>
+        <div class="dashboard-section">
+            <div id="radio-display">
+                <div id="radio-station">CITY HITS 94.5</div>
+                <div id="radio-frequency">94.5 FM</div>
+            </div>
+        </div>
+    </div>
     <div id="instructions">
         <strong>Controls:</strong><br>
         ↑↓ Keys or WASD: Forward/Backward<br>
@@ -201,6 +323,12 @@
         bgCtx.fillStyle = gradient;
         bgCtx.fillRect(0, 0, 512, 512);
         scene.background = new THREE.CanvasTexture(bgCanvas);
+
+        // Add fog for distance effect
+        const fogColor = 0x87CEEB; // Sky blue
+        const fogNear = 50;  // Close distance where fog starts
+        const fogFar = 500;  // Far distance where everything is fully fogged
+        scene.fog = new THREE.Fog(fogColor, fogNear, fogFar);
 
         const camera = new THREE.PerspectiveCamera(75, window.innerWidth/window.innerHeight, 0.1, 1000);
         camera.position.set(0, 10, 30); // Initial camera position
@@ -264,6 +392,7 @@
         const buildings = [];
         const pedestrians = [];
         const trees = [];
+        const birds = [];
         const treeGeometry = new THREE.ConeGeometry(2.5, 10, 8);
         const treeMaterial = new THREE.MeshBasicMaterial({ color: 0x228822 });
 
@@ -300,7 +429,10 @@
             const chunkGroup = new THREE.Group();
             
             const seed = chunkX * 73856093 ^ chunkZ * 19349663;
-            const roadSpacing = 50;
+            
+            // Use a cycling pattern of road spacings for variety
+            // This ensures consistency across chunks while providing visual variation
+            const roadSpacingCycle = [50, 75, 100];  // Varies every 200-375 units globally
             
             // Create single chunk ground plane with road texture
             const chunkCanvas = document.createElement('canvas');
@@ -317,19 +449,63 @@
             const roadWidthPixels = 20 * pixelsPerUnit;
             const cornerRadius = roadWidthPixels / 2;
             
-            // Collect all road positions
+            // Generate roads globally with cycling spacing pattern
             const horizontalRoadPositions = [];
             const verticalRoadPositions = [];
+            const horizontalRoadWorldPos = [];
+            const verticalRoadWorldPos = [];
             
-            for (let x = chunkOriginX - CHUNK_SIZE / 2; x <= chunkOriginX + CHUNK_SIZE * 1.5; x += roadSpacing) {
-                const pixelX = ((x - (chunkOriginX - CHUNK_SIZE / 2)) / (CHUNK_SIZE * 2)) * 2048;
-                horizontalRoadPositions.push(pixelX);
+            // Cycling road generation for variety
+            function generateCyclingRoads(anchor, chunkStart, chunkEnd, spacingCycle) {
+                const results = [];
+                let pos = anchor;
+                let cycleIndex = 0;
+                let roadsMade = 0;
+                
+                // Generate roads until we cover the range
+                while (pos < chunkEnd + 500) {
+                    if (pos >= chunkStart - 500) {
+                        results.push(pos);
+                    }
+                    const spacing = spacingCycle[cycleIndex % spacingCycle.length];
+                    pos += spacing;
+                    cycleIndex++;
+                }
+                
+                return results;
             }
             
-            for (let z = chunkOriginZ - CHUNK_SIZE / 2; z <= chunkOriginZ + CHUNK_SIZE * 1.5; z += roadSpacing) {
-                const pixelZ = ((z - (chunkOriginZ - CHUNK_SIZE / 2)) / (CHUNK_SIZE * 2)) * 2048;
-                verticalRoadPositions.push(pixelZ);
-            }
+            // Generate roads for this chunk with cycling pattern
+            const hRoads = generateCyclingRoads(
+                -10000,
+                chunkOriginZ - CHUNK_SIZE / 2,
+                chunkOriginZ + CHUNK_SIZE * 1.5,
+                roadSpacingCycle
+            );
+            
+            const vRoads = generateCyclingRoads(
+                -10000,
+                chunkOriginX - CHUNK_SIZE / 2,
+                chunkOriginX + CHUNK_SIZE * 1.5,
+                roadSpacingCycle
+            );
+            
+            // Convert to pixel coordinates for rendering
+            hRoads.forEach(roadPos => {
+                const pixelX = ((roadPos - (chunkOriginZ - CHUNK_SIZE / 2)) / (CHUNK_SIZE * 2)) * 2048;
+                if (pixelX > -100 && pixelX < 2148) {
+                    horizontalRoadPositions.push(pixelX);
+                    horizontalRoadWorldPos.push(roadPos);
+                }
+            });
+            
+            vRoads.forEach(roadPos => {
+                const pixelZ = ((roadPos - (chunkOriginX - CHUNK_SIZE / 2)) / (CHUNK_SIZE * 2)) * 2048;
+                if (pixelZ > -100 && pixelZ < 2148) {
+                    verticalRoadPositions.push(pixelZ);
+                    verticalRoadWorldPos.push(roadPos);
+                }
+            });
             
             // Draw gray road base
             chunkCtx.fillStyle = '#5e5e5e';
@@ -443,6 +619,19 @@
             const numBuildings = Math.floor(seededRandom(seed) * 4) + 2;
             const placedBuildings = []; // Track buildings in this chunk for collision detection
             
+            // Helper function to check if position is too close to any road
+            function isTooCloseToRoad(worldX, worldZ, buffer = 10) {
+                // Check horizontal roads
+                for (let roadX of horizontalRoadWorldPos) {
+                    if (Math.abs(worldZ - roadX) < buffer) return true;
+                }
+                // Check vertical roads
+                for (let roadZ of verticalRoadWorldPos) {
+                    if (Math.abs(worldX - roadZ) < buffer) return true;
+                }
+                return false;
+            }
+            
             for (let i = 0; i < numBuildings; i++) {
                 const buildingSeed = seed + i;
                 const localX = seededRandom(buildingSeed) * CHUNK_SIZE;
@@ -450,9 +639,12 @@
                 const worldX = chunkOriginX + localX;
                 const worldZ = chunkOriginZ + localZ;
                 
+                // Skip if too close to origin (spawn point)
+                const distToOrigin = Math.sqrt(worldX * worldX + worldZ * worldZ);
+                if (distToOrigin < 50) continue;
+                
                 // Skip if too close to roads
-                if ((localX % roadSpacing < 10 || localX % roadSpacing > roadSpacing - 10) ||
-                    (localZ % roadSpacing < 10 || localZ % roadSpacing > roadSpacing - 10)) continue;
+                if (isTooCloseToRoad(worldX, worldZ, 15)) continue;
                 
                 const width = seededRandom(buildingSeed + 2) * 25 + 15;
                 const depth = seededRandom(buildingSeed + 3) * 25 + 15;
@@ -533,8 +725,12 @@
                 const worldX = chunkOriginX + localX;
                 const worldZ = chunkOriginZ + localZ;
                 
-                if ((localX % roadSpacing < 15 || localX % roadSpacing > roadSpacing - 15) ||
-                    (localZ % roadSpacing < 15 || localZ % roadSpacing > roadSpacing - 15)) continue;
+                // Skip if too close to origin (spawn point)
+                const distToOrigin = Math.sqrt(worldX * worldX + worldZ * worldZ);
+                if (distToOrigin < 50) continue;
+                
+                // Skip if too close to roads
+                if (isTooCloseToRoad(worldX, worldZ, 15)) continue;
                 
                 const tree = new THREE.Mesh(treeGeometry, treeMaterial);
                 tree.position.set(worldX, 5, worldZ);
@@ -551,18 +747,38 @@
                 const worldX = chunkOriginX + localX;
                 const worldZ = chunkOriginZ + localZ;
                 
-                // Spawn pedestrians on sidewalks (not on roads)
-                if ((localX % roadSpacing < 20 && localX % roadSpacing > -5) ||
-                    (localZ % roadSpacing < 20 && localZ % roadSpacing > -5)) continue;
+                // Skip if too close to origin (spawn point)
+                const distToOrigin = Math.sqrt(worldX * worldX + worldZ * worldZ);
+                if (distToOrigin < 50) continue;
+                
+                // Spawn pedestrians on sidewalks (not on roads, but close to them)
+                if (isTooCloseToRoad(worldX, worldZ, 25)) continue;
                 
                 const ped = createPedestrian();
                 ped.position.set(worldX, 1.5, worldZ);
                 chunkGroup.add(ped);
                 
-                const minX = Math.floor(localX / roadSpacing) * roadSpacing + chunkOriginX;
-                const maxX = minX + roadSpacing;
-                const minZ = Math.floor(localZ / roadSpacing) * roadSpacing + chunkOriginZ;
-                const maxZ = minZ + roadSpacing;
+                // Find nearest road boundaries for movement constraints
+                let minX = chunkOriginX;
+                let maxX = chunkOriginX + CHUNK_SIZE;
+                let minZ = chunkOriginZ;
+                let maxZ = chunkOriginZ + CHUNK_SIZE;
+                
+                // Find the road block boundaries
+                for (let j = 0; j < verticalRoadWorldPos.length - 1; j++) {
+                    if (worldX >= verticalRoadWorldPos[j] && worldX <= verticalRoadWorldPos[j + 1]) {
+                        minX = verticalRoadWorldPos[j];
+                        maxX = verticalRoadWorldPos[j + 1];
+                        break;
+                    }
+                }
+                for (let j = 0; j < horizontalRoadWorldPos.length - 1; j++) {
+                    if (worldZ >= horizontalRoadWorldPos[j] && worldZ <= horizontalRoadWorldPos[j + 1]) {
+                        minZ = horizontalRoadWorldPos[j];
+                        maxZ = horizontalRoadWorldPos[j + 1];
+                        break;
+                    }
+                }
                 
                 pedestrians.push({
                     mesh: ped,
@@ -582,41 +798,54 @@
                 const carSeed = seed + 300 + i;
                 const carColor = Math.floor(seededRandom(carSeed) * 0xffffff);
                 
-                // Create waypoints along roads (not diagonal)
+                // Create waypoints along actual roads
                 const waypoints = [];
                 
-                // Pick a starting road position
-                const startRoadIdx = Math.floor(seededRandom(carSeed) * 4);
-                const roads = [
-                    { x: chunkOriginX - CHUNK_SIZE / 2, z: chunkOriginZ },
-                    { x: chunkOriginX + CHUNK_SIZE / 2, z: chunkOriginZ },
-                    { x: chunkOriginX, z: chunkOriginZ - CHUNK_SIZE / 2 },
-                    { x: chunkOriginX, z: chunkOriginZ + CHUNK_SIZE / 2 }
-                ];
+                // Pick a random starting position on an actual road
+                if (horizontalRoadWorldPos.length === 0 || verticalRoadWorldPos.length === 0) continue;
                 
-                let currentPos = roads[startRoadIdx];
+                const useHorizontalStart = seededRandom(carSeed) > 0.5;
+                let currentPos;
+                
+                if (useHorizontalStart && horizontalRoadWorldPos.length > 0) {
+                    const roadIdx = Math.floor(seededRandom(carSeed + 1) * horizontalRoadWorldPos.length);
+                    const vertIdx = Math.floor(seededRandom(carSeed + 2) * verticalRoadWorldPos.length);
+                    currentPos = { x: verticalRoadWorldPos[vertIdx], z: horizontalRoadWorldPos[roadIdx] };
+                } else if (verticalRoadWorldPos.length > 0) {
+                    const roadIdx = Math.floor(seededRandom(carSeed + 1) * verticalRoadWorldPos.length);
+                    const horIdx = Math.floor(seededRandom(carSeed + 2) * horizontalRoadWorldPos.length);
+                    currentPos = { x: verticalRoadWorldPos[roadIdx], z: horizontalRoadWorldPos[horIdx] };
+                } else {
+                    continue;
+                }
+                
                 waypoints.push({ x: currentPos.x, z: currentPos.z });
                 
                 // Skip if starting position is too close to player spawn (0, 0)
                 const distToOrigin = Math.sqrt(currentPos.x * currentPos.x + currentPos.z * currentPos.z);
                 if (distToOrigin < 30) {
-                    continue; // Skip this AI car
+                    continue;
                 }
                 
-                // Generate path along roads (horizontal or vertical movement only)
-                const numWaypoints = 8;
+                // Generate path along actual roads
+                const numWaypoints = 6;
                 
                 for (let j = 0; j < numWaypoints; j++) {
-                    const moveDirection = Math.floor(seededRandom(carSeed + 10 + j) * 2); // 0 = horizontal, 1 = vertical
-                    const distance = (Math.floor(seededRandom(carSeed + 20 + j) * 3) + 1) * roadSpacing;
+                    const moveDirection = Math.floor(seededRandom(carSeed + 10 + j) * 2);
                     const sign = seededRandom(carSeed + 30 + j) > 0.5 ? 1 : -1;
                     
-                    if (moveDirection === 0) {
-                        // Move horizontally
-                        currentPos = { x: currentPos.x + distance * sign, z: currentPos.z };
-                    } else {
-                        // Move vertically
-                        currentPos = { x: currentPos.x, z: currentPos.z + distance * sign };
+                    if (moveDirection === 0 && verticalRoadWorldPos.length > 1) {
+                        // Move to a different vertical road (horizontal movement)
+                        const currentVertIdx = verticalRoadWorldPos.findIndex(r => Math.abs(r - currentPos.x) < 5);
+                        let newIdx = currentVertIdx + (sign > 0 ? 1 : -1);
+                        newIdx = Math.max(0, Math.min(verticalRoadWorldPos.length - 1, newIdx));
+                        currentPos = { x: verticalRoadWorldPos[newIdx], z: currentPos.z };
+                    } else if (horizontalRoadWorldPos.length > 1) {
+                        // Move to a different horizontal road (vertical movement)
+                        const currentHorIdx = horizontalRoadWorldPos.findIndex(r => Math.abs(r - currentPos.z) < 5);
+                        let newIdx = currentHorIdx + (sign > 0 ? 1 : -1);
+                        newIdx = Math.max(0, Math.min(horizontalRoadWorldPos.length - 1, newIdx));
+                        currentPos = { x: currentPos.x, z: horizontalRoadWorldPos[newIdx] };
                     }
                     waypoints.push({ x: currentPos.x, z: currentPos.z });
                 }
@@ -634,6 +863,36 @@
                         laneOffset: laneOffset,
                         chunkKey: chunkKey
                     });
+                });
+            }
+
+            // Generate birds flying in the sky
+            const numBirds = Math.floor(seededRandom(seed + 400) * 3) + 2;
+            for (let i = 0; i < numBirds; i++) {
+                const birdSeed = seed + 400 + i;
+                const localX = seededRandom(birdSeed) * CHUNK_SIZE;
+                const localZ = seededRandom(birdSeed + 1) * CHUNK_SIZE;
+                const worldX = chunkOriginX + localX;
+                const worldZ = chunkOriginZ + localZ;
+                
+                const bird = createBird();
+                bird.position.set(worldX, 60 + seededRandom(birdSeed + 2) * 20, worldZ);
+                chunkGroup.add(bird);
+                
+                // Create circular flight path around spawn center
+                const radius = 30 + seededRandom(birdSeed + 3) * 40;
+                const centerX = worldX;
+                const centerZ = worldZ;
+                const speed = 0.01 + seededRandom(birdSeed + 4) * 0.015;
+                
+                birds.push({
+                    mesh: bird,
+                    centerX: centerX,
+                    centerZ: centerZ,
+                    radius: radius,
+                    angle: seededRandom(birdSeed + 5) * Math.PI * 2,
+                    speed: speed,
+                    chunkKey: chunkKey
                 });
             }
             
@@ -681,6 +940,14 @@
                         const aiCar = aiCars[i];
                         if (aiCar.chunkKey === key) {
                             aiCars.splice(i, 1);
+                        }
+                    }
+
+                    // Clean up birds in this chunk
+                    for (let i = birds.length - 1; i >= 0; i--) {
+                        const bird = birds[i];
+                        if (bird.chunkKey === key) {
+                            birds.splice(i, 1);
                         }
                     }
                     
@@ -758,22 +1025,29 @@
         function createPedestrian() {
             const pedGroup = new THREE.Group();
 
+            // Random colors for variety
+            const shirtColors = [0x0000ff, 0xff0000, 0x00ff00, 0xffff00, 0xff00ff, 0x00ffff, 0xffa500, 0x800080, 0xffffff, 0x808080];
+            const skinTones = [0xffdbac, 0xf1c27d, 0xe0ac69, 0xc68642, 0x8d5524, 0x6b3410];
+            
+            const randomShirt = shirtColors[Math.floor(Math.random() * shirtColors.length)];
+            const randomSkin = skinTones[Math.floor(Math.random() * skinTones.length)];
+
             // Body
             const bodyGeom = new THREE.BoxGeometry(0.6, 1.5, 0.45);
-            const bodyMat = new THREE.MeshLambertMaterial({ color: 0x0000ff }); // blue shirt
+            const bodyMat = new THREE.MeshLambertMaterial({ color: randomShirt });
             const body = new THREE.Mesh(bodyGeom, bodyMat);
             pedGroup.add(body);
 
             // Head
             const headGeom = new THREE.SphereGeometry(0.3, 8, 8);
-            const headMat = new THREE.MeshLambertMaterial({ color: 0xffdbac });
+            const headMat = new THREE.MeshLambertMaterial({ color: randomSkin });
             const head = new THREE.Mesh(headGeom, headMat);
             head.position.y = 1.05;
             pedGroup.add(head);
 
             // Arms
             const armGeom = new THREE.CylinderGeometry(0.075, 0.075, 0.9, 8);
-            const armMat = new THREE.MeshLambertMaterial({ color: 0xffdbac });
+            const armMat = new THREE.MeshLambertMaterial({ color: randomSkin });
             const leftArm = new THREE.Mesh(armGeom, armMat);
             leftArm.position.set(-0.45, 0.3, 0);
             leftArm.rotation.z = Math.PI / 6;
@@ -796,11 +1070,38 @@
             return pedGroup;
         }
 
+        // Bird creation function
+        function createBird() {
+            const birdGroup = new THREE.Group();
+            
+            // Body - tetrahedron shape
+            const bodyGeom = new THREE.TetrahedronGeometry(0.3, 0);
+            const bodyMat = new THREE.MeshLambertMaterial({ color: 0x333333 }); // Dark gray body
+            const body = new THREE.Mesh(bodyGeom, bodyMat);
+            birdGroup.add(body);
+            
+            // Head - small sphere
+            const headGeom = new THREE.SphereGeometry(0.15, 6, 6);
+            const headMat = new THREE.MeshLambertMaterial({ color: 0x222222 });
+            const head = new THREE.Mesh(headGeom, headMat);
+            head.position.set(0.2, 0.1, 0);
+            birdGroup.add(head);
+            
+            // Wings - simple box geometry
+            const wingGeom = new THREE.BoxGeometry(1.2, 0.1, 0.4);
+            const wingMat = new THREE.MeshLambertMaterial({ color: 0x555555 });
+            const wings = new THREE.Mesh(wingGeom, wingMat);
+            birdGroup.add(wings);
+            
+            return birdGroup;
+        }
+
         // Player car
         let car;
         let playerPedestrian = null;
         let isInCar = true;
         const playerPedSpeed = 0.15; // Direct speed for pedestrian movement
+
         
         createCar(function(loadedCar) {
             car = loadedCar;
@@ -845,8 +1146,8 @@
             if (!car || !playerPedestrian) return;
             
             if (isInCar) {
-                // Exit car - must be stopped
-                if (Math.abs(currentSpeed) < 0.01) {
+                // Exit car - must be moving slowly or stopped
+                if (Math.abs(currentSpeed) < 0.15) {
                     isInCar = false;
                     car.visible = true; // Keep car visible
                     playerPedestrian.visible = true;
@@ -871,14 +1172,12 @@
                 );
                 if (distanceToCar < 5) {
                     isInCar = true;
+                    isFirstPerson = false; // Switch to third person when entering car
                     playerPedestrian.visible = false;
+                    car.visible = true;
                     // Update UI
                     document.getElementById('exit-car-button').textContent = 'EXIT CAR (E)';
-                    if (isFirstPerson) {
-                        car.visible = false;
-                    } else {
-                        car.visible = true;
-                    }
+                    document.getElementById('view-toggle').textContent = '1ST PERSON';
                 }
             }
         }
@@ -938,6 +1237,9 @@
         // Mouse movement for camera control
         document.addEventListener('mousemove', function(event) {
             if (!isPointerLocked) return;
+            
+            // Disable mouse look when driving in first person
+            if (isInCar && isFirstPerson) return;
             
             mouseYaw -= event.movementX * mouseSensitivity;
             mousePitch -= event.movementY * mouseSensitivity;
@@ -1108,6 +1410,11 @@
                     moveZ = (moveZ / moveMagnitude) * playerPedSpeed;
                 }
                 
+                // Rotate pedestrian to face movement direction
+                if (moveMagnitude > 0.01) {
+                    playerPedestrian.rotation.y = Math.atan2(moveX, moveZ);
+                }
+                
                 playerPedestrian.position.x += moveX;
                 playerPedestrian.position.z += moveZ;
             }
@@ -1246,13 +1553,11 @@
                     camera.position.z = car.position.z + driverOffsetZ;
                     camera.position.y = car.position.y + 1.2;
                     
-                    // Apply mouse rotation for free look
-                    const lookDistance = 8;
-                    const totalYaw = car.rotation.y + mouseYaw;
-                    const lookX = car.position.x + Math.sin(totalYaw) * Math.cos(mousePitch) * lookDistance;
-                    const lookZ = car.position.z + Math.cos(totalYaw) * Math.cos(mousePitch) * lookDistance;
-                    const lookY = car.position.y + 0.8 + Math.sin(mousePitch) * lookDistance;
-                    camera.lookAt(lookX, lookY, lookZ);
+                    // Look ahead in the direction of the car (no mouse look)
+                    const lookAheadDistance = 8;
+                    const lookX = car.position.x + Math.sin(car.rotation.y) * lookAheadDistance;
+                    const lookZ = car.position.z + Math.cos(car.rotation.y) * lookAheadDistance;
+                    camera.lookAt(lookX, car.position.y + 0.8, lookZ);
                 } else {
                     // Third person view with mouse control
                     car.visible = true;
@@ -1345,6 +1650,96 @@
                 }
             });
 
+            // Update birds - fly in circular patterns
+            birds.forEach(bird => {
+                bird.angle += bird.speed;
+                bird.mesh.position.x = bird.centerX + Math.cos(bird.angle) * bird.radius;
+                bird.mesh.position.z = bird.centerZ + Math.sin(bird.angle) * bird.radius;
+                // Rotate bird to face direction of movement
+                bird.mesh.rotation.y = bird.angle + Math.PI / 2;
+            });
+
+            // Update dashboard in first-person car view
+            const dashboard = document.getElementById('dashboard');
+            if (isInCar && isFirstPerson) {
+                dashboard.classList.add('visible');
+                
+                // Update speedometer using canvas
+                const canvas = document.getElementById('speedometer-canvas');
+                const ctx = canvas.getContext('2d');
+                const centerX = canvas.width / 2;
+                const centerY = canvas.height / 2;
+                const radius = 70;
+                
+                // Clear canvas
+                ctx.clearRect(0, 0, canvas.width, canvas.height);
+                
+                // Draw gauge background
+                ctx.beginPath();
+                ctx.arc(centerX, centerY, radius, 0, Math.PI * 2);
+                ctx.fillStyle = 'rgba(0, 30, 0, 0.9)';
+                ctx.fill();
+                ctx.strokeStyle = '#00ff00';
+                ctx.lineWidth = 2;
+                ctx.stroke();
+                
+                // Draw gauge markings
+                ctx.strokeStyle = '#00ff00';
+                ctx.lineWidth = 1;
+                for (let i = 0; i <= 10; i++) {
+                    const angle = Math.PI - (i / 10) * Math.PI; // 180 to 0 degrees
+                    const x1 = centerX + Math.cos(angle) * (radius - 5);
+                    const y1 = centerY + Math.sin(angle) * (radius - 5);
+                    const x2 = centerX + Math.cos(angle) * (radius - 15);
+                    const y2 = centerY + Math.sin(angle) * (radius - 15);
+                    ctx.beginPath();
+                    ctx.moveTo(x1, y1);
+                    ctx.lineTo(x2, y2);
+                    ctx.stroke();
+                    
+                    // Draw numbers
+                    const speed = i * 5;
+                    ctx.fillStyle = '#00ff00';
+                    ctx.font = 'bold 10px Arial';
+                    ctx.textAlign = 'center';
+                    ctx.textBaseline = 'middle';
+                    const labelX = centerX + Math.cos(angle) * (radius - 25);
+                    const labelY = centerY + Math.sin(angle) * (radius - 25);
+                    ctx.fillText(speed.toString(), labelX, labelY);
+                }
+                
+                // Draw needle
+                const speedPercent = Math.min(currentSpeed / maxSpeed, 1);
+                const needleAngle = Math.PI - (speedPercent * Math.PI); // 180 to 0 degrees
+                const needleLength = radius - 20;
+                const needleX = centerX + Math.cos(needleAngle) * needleLength;
+                const needleY = centerY + Math.sin(needleAngle) * needleLength;
+                
+                ctx.strokeStyle = '#00ff00';
+                ctx.lineWidth = 3;
+                ctx.beginPath();
+                ctx.moveTo(centerX, centerY);
+                ctx.lineTo(needleX, needleY);
+                ctx.stroke();
+                
+                // Draw center dot
+                ctx.fillStyle = '#00ff00';
+                ctx.beginPath();
+                ctx.arc(centerX, centerY, 5, 0, Math.PI * 2);
+                ctx.fill();
+                
+                // Update speed text
+                const displaySpeed = Math.round(currentSpeed * 100); // Convert to approximate mph
+                document.getElementById('speed-text').textContent = displaySpeed;
+                
+                // Update steering wheel rotation
+                const steeringWheel = document.getElementById('steering-wheel');
+                const wheelRotation = -currentRotation * 100; // Scale rotation for visibility
+                steeringWheel.style.transform = `rotate(${wheelRotation}deg)`;
+            } else {
+                dashboard.classList.remove('visible');
+            }
+
             renderer.render(scene, camera);
         }
 
@@ -1358,4 +1753,4 @@
         });
     </script>
 </body>
-</html>w
+</html>

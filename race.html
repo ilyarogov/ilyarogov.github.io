@@ -290,6 +290,7 @@
         ← → Keys or AD: Left/Right<br>
         E: Exit/Enter Car (when near car)<br>
         Mouse: Click to enable camera control<br>
+        Touch: Swipe to rotate camera<br>
         ESC: Release mouse control<br>
         Avoid cars, buildings, trees, and pedestrians!
     </div>
@@ -1323,6 +1324,47 @@
             () => { targetRotation = -0.05; },
             () => { targetRotation = 0; }
         );
+
+        // Touch camera controls - swipe to rotate camera
+        let touchStartX = 0;
+        let touchStartY = 0;
+        let isTouchingCanvas = false;
+        const touchSensitivity = 0.003;
+        
+        renderer.domElement.addEventListener('touchstart', (event) => {
+            // Don't interfere with control buttons
+            if (event.target.classList.contains('control-button')) {
+                return;
+            }
+            isTouchingCanvas = true;
+            touchStartX = event.touches[0].clientX;
+            touchStartY = event.touches[0].clientY;
+        });
+        
+        renderer.domElement.addEventListener('touchmove', (event) => {
+            if (!isTouchingCanvas) return;
+            
+            // Don't rotate camera while in car in first person (allows car turning touch)
+            if (isInCar && isFirstPerson) return;
+            
+            const deltaX = event.touches[0].clientX - touchStartX;
+            const deltaY = event.touches[0].clientY - touchStartY;
+            
+            // Update camera rotation based on swipe
+            mouseYaw -= deltaX * touchSensitivity;
+            mousePitch -= deltaY * touchSensitivity;
+            
+            // Clamp pitch to prevent over-rotation
+            mousePitch = Math.max(-maxPitch, Math.min(maxPitch, mousePitch));
+            
+            // Update touch position for continuous movement
+            touchStartX = event.touches[0].clientX;
+            touchStartY = event.touches[0].clientY;
+        });
+        
+        renderer.domElement.addEventListener('touchend', (event) => {
+            isTouchingCanvas = false;
+        });
 
         // Animation Loop
         function animate() {
